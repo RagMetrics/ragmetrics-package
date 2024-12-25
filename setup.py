@@ -1,13 +1,13 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='ragmetrics',
+    name='ragmetrics-pkg',
     version='0.1.0',
     packages=find_packages(),
     install_requires=[
         'requests'
     ],
-    author='',
+    author='ragmetrics',
     author_email='',
     description='A package for integrating RagMetrics with LLM calls',
     url='https://github.com/RagMetrics/ragmetrics-package',
