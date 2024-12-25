@@ -1,3 +1,0 @@
-"""
-RagMetrics Python Package
-"""
