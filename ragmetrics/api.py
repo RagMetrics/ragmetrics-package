@@ -1,12 +1,13 @@
 import os
-
+import types
 import requests
+from litellm import completion
 
 
 class RagMetricsClient:
     def __init__(self):
         self.access_token = None
-        self.site_domain = 'http://127.0.0.1:5000'
+        self.site_domain = 'http://20.83.187.1:5000'
         self.original_create_method = None
         self.logging_off = False
 
@@ -45,19 +46,18 @@ class RagMetricsClient:
 
     def monitor(self, client, context):
         """
-        Patch the OpenAI client to automatically log chat completions.
-        This method assumes the user may provide their own OpenAI client with an API key.
+        Patch the OpenAI-compatible client to automatically log chat completions.
+        This method assumes the user may provide their own client with an API key.
         """
         # Check if the client has an API key set
         if not client.api_key:
             if not os.environ.get("OPENAI_API_KEY"):
                 raise ValueError("OpenAI API key is not set. Please log in first.")
-            client.api_key = os.environ["OPENAI_API_KEY"]  # Set the API key for the OpenAI client
+            client.api_key = os.environ["OPENAI_API_KEY"]  # Set the API key for the client
 
-        self.original_create_method = client.chat.completions.create
-
+        # Define a new method to handle completion requests
         def new_create_method(*args, **kwargs):
-            # Prepare the data to send to the Django API
+            # Prepare the data to send to the Litellm proxy
             input_data = {
                 "off": self.logging_off,
                 "model": kwargs.get('model', []),
@@ -70,11 +70,15 @@ class RagMetricsClient:
             # Log the call to RagMetrics
             trace_response = self.log_trace(api_client=client, input_data=input_data)
 
-            # Call the original OpenAI create method and return its response
-            openai_response = self.original_create_method(*args, **kwargs, store=True)
-            return openai_response  # Return the OpenAI response as the actual response
+            # Call the Litellm proxy to get the response
+            response = completion(model=kwargs.get('model'), messages=kwargs.get('messages'), api_key=os.environ["OPENAI_API_KEY"])
+            return response  # Return the Litellm response as the actual response
 
-        client.chat.completions.create = new_create_method
+        # Patch the create method for OpenAI-compatible clients
+        if hasattr(client.chat.completions, 'create'):
+            client.chat.completions.create = types.MethodType(new_create_method, client.chat.completions)
+        elif hasattr(client.chat, 'complete'):
+            client.chat.complete = types.MethodType(new_create_method, client.chat)
 
     def log_trace(self, api_client, input_data):
         """
