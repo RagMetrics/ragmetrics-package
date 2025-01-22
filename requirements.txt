@@ -1,0 +1,2 @@
+requests
+litellm==1.59.0
