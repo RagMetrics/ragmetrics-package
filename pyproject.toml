@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "build"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragmetrics-pkg"
+version = "0.1.4"
+description = "A package for integrating RagMetrics with LLM calls"
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "requests"
+]
+authors = [
+    { name = "ragmetrics" }
+]
+urls = { 
+    Homepage = "https://ragmetrics.ai", 
+    Repository = "https://github.com/RagMetrics/ragmetrics-package" 
+}
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
