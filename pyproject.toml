@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel", "build"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ragmetrics-pkg"
-version = "0.1.5"
+name = "ragmetrics-client"
+version = "0.1.6"
 description = "Monitor LLM calls to RagMetrics"
 readme = "README.md"
 requires-python = ">=3.6"

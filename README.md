@@ -3,8 +3,8 @@
         Monitor your LLM calls. Test your LLM app.
     </p>
 <h4 align="center">
-    <a href="https://pypi.org/project/ragmetrics-pkg/" target="_blank">
-        <img src="https://img.shields.io/pypi/v/ragmetrics-pkg.svg" alt="PyPI Version">
+    <a href="https://pypi.org/project/ragmetrics-client/" target="_blank">
+        <img src="https://img.shields.io/pypi/v/ragmetrics-client.svg" alt="PyPI Version">
     </a>
 </h4>
 
@@ -19,7 +19,7 @@ With this package, you can log your LLM calls to RagMetrics and use them as labe
 # Quickstart
 
 ```shell
-pip install ragmetrics-pkg
+pip install ragmetrics-client
 ```
 
 ```python
