@@ -10,7 +10,7 @@ load_dotenv(".env")
 #Login with os.environ['RAGMETRICS_API_KEY']
 # or ragmetrics.login(key="your_ragmetrics_api_key")
 # Get the key at https://ragmetrics.ai/
-ragmetrics.login()
+ragmetrics.login(base_url="http://localhost:8000")
 
 def print_response(label, response):
     # Try chat-completion style first.
