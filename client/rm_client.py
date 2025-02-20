@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 #!pip install ragmetrics-client
 #!pip install openai litellm langchain_groq
 
@@ -34,7 +33,6 @@ def my_callback(raw_input, raw_output):
 
 # Test OpenAI client (chat-based)
 openai_client = OpenAI()
-#ragmetrics.monitor(openai_client, context={"client": "openai"}, callback=my_callback)
 ragmetrics.monitor(openai_client, context={"client": "openai"})
 messages = create_messages("OpenAI", "France")
 resp = openai_client.chat.completions.create(
@@ -45,7 +43,7 @@ resp = openai_client.chat.completions.create(
 print(resp)
 
 # Test LiteLLM client (module-level function)
-ragmetrics.monitor(litellm, context={"client": "litellm"}, callback=my_callback)
+ragmetrics.monitor(litellm, context={"client": "litellm"})
 messages = create_messages("LiteLLM", "Germany")
 resp = litellm.completion(
     model="gpt-3.5-turbo",
@@ -60,42 +58,7 @@ langchain_model = ChatGroq(model="llama3-8b-8192")
 messages = create_messages("LangChain", "Italy")
 resp = langchain_model.invoke(
     model="llama3-8b-8192",
-    messages=messages,
+    input=messages,
     metadata={"task": "test", "step": "langchain"}
 )
 print(resp)
-=======
-import ragmetrics
-from openai import OpenAI
-import litellm
-
-from dotenv import load_dotenv
-import os
-load_dotenv(".env")
-
-ragmetrics.login(os.environ["RAGMETRICS_KEY"])
-
-# #Use for OpenAI
-openai_client = OpenAI()
-ragmetrics.monitor(openai_client)
-response = openai_client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "What is the capital of France?"}
-    ]
-)
-print("OpenAI Response:", response.choices[0].message.content)
-
-
-#Use for LiteLLM
-ragmetrics.monitor(litellm)
-response = litellm.completion(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "What is the capital of Germany?"}
-    ]
-)
-print("LiteLLM Response:", response['choices'][0]['message']['content'])
->>>>>>> 785646bba1980b84ff55ced00710db4060225477

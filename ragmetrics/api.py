@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 def default_input(input):
     if not input:
         return None
-    last_msg = input[-1]
-    content = last_msg['content']
-    return content
+    if isinstance(input, list):
+        input_str = "\n".join(f"{m['role']}: {m['content']}" for m in input)
+    else:
+        input_str = str(input)
+    return input_str
 
 def default_output(response):
     if not response:
@@ -209,14 +211,17 @@ class RagMetricsClient:
             def invoke_wrapper(*args, **kwargs):
                 start_time = time.time()
                 metadata = kwargs.pop('metadata', None)
-                messages = kwargs.pop('messages', None)
-                if messages is not None:
-                    input_str = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-                    kwargs["input"] = input_str
-                response = orig_invoke(*args, **kwargs)
+
+                response = orig_invoke(*args, **kwargs)                
+                
+                input_messages = kwargs.pop('input', None)
+                # if messages is not None:
+                #     input_str = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+                #     kwargs["input"] = input_str
+
                 duration = time.time() - start_time
-                cb_result = callback(messages, response)
-                self._log_trace(messages, response, context, metadata, duration, callback_result=cb_result, **kwargs)
+                cb_result = callback(input_messages, response)
+                self._log_trace(input_messages, response, context, metadata, duration, callback_result=cb_result, **kwargs)
                 return response
             if isinstance(client, type):
                 setattr(client, "invoke", invoke_wrapper)
