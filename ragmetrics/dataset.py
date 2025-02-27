@@ -30,7 +30,7 @@ class Dataset:
         """
         payload = {
             "datasetName": self.name,
-            "datasetSource":"DM" ,
+            "datasetSource":"DA" , 
             "examples": [ex.to_dict() for ex in self.examples],
             "datasetQty": len(self.examples) 
         }
@@ -48,20 +48,14 @@ class Dataset:
             raise Exception("Failed to save dataset: " + response.text)
 
     @classmethod
-    def download(cls, name):
+    def download(cls, id):
         """
         Downloads a dataset from RagMetrics.
         """
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
 
         # Determine if the identifier is numeric.
-        try:
-            # If this conversion succeeds, treat identifier as an ID.
-            int(name)
-            endpoint = f"/api/client/dataset/download/?id={name}"
-        except (ValueError, TypeError):
-            # Otherwise, treat it as a name.
-            endpoint = f"/api/client/dataset/download/?name={name}"
+        endpoint = f"/api/client/dataset/download/?id={id}"
 
         response = ragmetrics_client._make_request(
             method="GET",
