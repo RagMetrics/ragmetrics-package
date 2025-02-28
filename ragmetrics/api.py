@@ -103,7 +103,8 @@ class RagMetricsClient:
             "input": None,
             "output": None,
             "expected": None,            
-            "scores": None
+            "scores": None,
+            "context": context
         }
 
         # Process callback_result if provided
