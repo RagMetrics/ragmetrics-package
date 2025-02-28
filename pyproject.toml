@@ -14,10 +14,7 @@ dependencies = [
 authors = [
     { name = "ragmetrics" }
 ]
-urls = { 
-    Homepage = "https://ragmetrics.ai", 
-    Repository = "https://github.com/RagMetrics/ragmetrics-package" 
-}
+urls = { Homepage = "https://ragmetrics.ai", Repository = "https://github.com/RagMetrics/ragmetrics-package" }
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "License :: OSI Approved :: MIT License",
