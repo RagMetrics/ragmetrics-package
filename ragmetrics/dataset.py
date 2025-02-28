@@ -72,6 +72,9 @@ class Dataset:
             ]
             ds = cls(examples, ds_data.get("name", ""))
             ds.id = ds_data.get("id")
+            ds.source_type = ds_data.get("source_type", "")
+            ds.source_file = ds_data.get("source_file", "")
+            ds.questions_qty = ds_data.get("questions_qty", 0)
             return ds
         else:
             raise Exception("Failed to download dataset: " + response.text)
