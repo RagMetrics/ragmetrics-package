@@ -49,7 +49,7 @@ class RagMetricsClient:
         self.access_token = None
         self.base_url = 'https://ragmetrics.ai'
         self.logging_off = False
-        self.context = None
+        self.metadata = None
 
     def _find_external_caller(self) -> str:
         """
@@ -66,7 +66,7 @@ class RagMetricsClient:
             frame = frame.f_back
         return external_caller
 
-    def _log_trace(self, input_messages, response, context, metadata, duration, callback_result=None, **kwargs):
+    def _log_trace(self, input_messages, response, metadata, metadata_llm, duration, callback_result=None, **kwargs):
         if self.logging_off:
             return
 
@@ -85,10 +85,10 @@ class RagMetricsClient:
 
         # Merge context and metadata dictionaries; treat non-dict values as empty.
         union_metadata = {}
-        if isinstance(context, dict):
-            union_metadata.update(context)
         if isinstance(metadata, dict):
             union_metadata.update(metadata)
+        if isinstance(metadata_llm, dict):
+            union_metadata.update(metadata_llm)
 
         # Construct the payload with placeholders for callback result
         payload = {
@@ -103,8 +103,7 @@ class RagMetricsClient:
             "input": None,
             "output": None,
             "expected": None,            
-            "scores": None,
-            "context": context
+            "scores": None
         }
 
         # Process callback_result if provided
@@ -183,11 +182,11 @@ class RagMetricsClient:
         response = requests.request(method, url, **kwargs)
         return response
 
-    def monitor(self, client, context, callback: Optional[Callable[[Any, Any], dict]] = None):
+    def monitor(self, client, metadata, callback: Optional[Callable[[Any, Any], dict]] = None):
         if not self.access_token:
             raise ValueError("Missing access token. Please get a new one at RagMetrics.ai.")
-        if context is not None:
-            self.context = context
+        if metadata is not None:
+            self.metadata = metadata
 
         # Use default callback if none provided.
         if callback is None:
@@ -199,19 +198,19 @@ class RagMetricsClient:
         if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
             def openai_wrapper(self_instance, *args, **kwargs):
                 start_time = time.time()
-                metadata = kwargs.pop('metadata', None)
+                metadata_llm = kwargs.pop('metadata', None)
                 response = orig_invoke(self_instance, *args, **kwargs)
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, context, metadata, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
         # Handle LangChain-style clients that support invoke (class or instance)
         elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
             def invoke_wrapper(*args, **kwargs):
                 start_time = time.time()
-                metadata = kwargs.pop('metadata', None)
+                metadata_llm = kwargs.pop('metadata', None)
 
                 response = orig_invoke(*args, **kwargs)                
                 
@@ -222,7 +221,7 @@ class RagMetricsClient:
 
                 duration = time.time() - start_time
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, context, metadata, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
                 return response
             if isinstance(client, type):
                 setattr(client, "invoke", invoke_wrapper)
@@ -232,12 +231,12 @@ class RagMetricsClient:
         elif hasattr(client, "completion"):
             def lite_wrapper(*args, **kwargs):
                 start_time = time.time()
-                metadata = kwargs.pop('metadata', None)
+                metadata_llm = kwargs.pop('metadata', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, context, metadata, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
                 return response
             client.completion = lite_wrapper
         else:
@@ -249,5 +248,5 @@ ragmetrics_client = RagMetricsClient()
 def login(key=None, base_url=None, off=False):
     return ragmetrics_client.login(key, base_url, off)
 
-def monitor(client, context=None, callback: Optional[Callable[[Any, Any], dict]] = None):
-    return ragmetrics_client.monitor(client, context, callback)
+def monitor(client, metadata=None, callback: Optional[Callable[[Any, Any], dict]] = None):
+    return ragmetrics_client.monitor(client, metadata, callback)
