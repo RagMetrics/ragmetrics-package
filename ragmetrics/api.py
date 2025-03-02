@@ -10,33 +10,33 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-def default_input(input):
-    if not input:
+def default_input(raw_input):
+    if not raw_input:
         return None
-    if isinstance(input, list):
-        input_str = "\n".join(f"{m['role']}: {m['content']}" for m in input)
+    if isinstance(raw_input, list):
+        input_str = "\n".join(f"{m['role']}: {m['content']}" for m in raw_input)
     else:
-        input_str = str(input)
+        input_str = str(raw_input)
     return input_str
 
-def default_output(response):
-    if not response:
+def default_output(raw_response):
+    if not raw_response:
         return None
     # OpenAI chat completion
-    if hasattr(response, "choices") and response.choices:
+    if hasattr(raw_response, "choices") and raw_response.choices:
         try:
             # OpenAI ChatCompletion objects expose choices as objects with a message attribute.
-            return response.choices[0].message.content
+            return raw_response.choices[0].message.content
         except Exception as e:
             logger.error("Error extracting content from response.choices: %s", e)
     # If response has a text attribute, return it (for non-chat completions)
-    if hasattr(response, "text"):
-        return response.text
+    if hasattr(raw_response, "text"):
+        return raw_response.text
     # Fallback to checking for a content attribute (if it's a simple object)
-    if hasattr(response, "content"):
-        return response.content
+    if hasattr(raw_response, "content"):
+        return raw_response.content
     # Unable to determine response content, log and return the raw response.
-    return response
+    return raw_response
 
 def default_callback(raw_input, raw_output) -> dict:
     return {
@@ -66,7 +66,7 @@ class RagMetricsClient:
             frame = frame.f_back
         return external_caller
 
-    def _log_trace(self, input_messages, response, metadata, metadata_llm, duration, callback_result=None, **kwargs):
+    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, callback_result=None, **kwargs):
         if self.logging_off:
             return
 
@@ -76,17 +76,17 @@ class RagMetricsClient:
         # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
         if hasattr(response, "model_dump"):
             #Pydantic v2
-            dump = response.model_dump() 
+            response_processed = response.model_dump() 
         if hasattr(response, "dict"):
             #Pydantic v1
-            dump = response.dict()
+            response_processed = response.dict()
         else:
-            dump = response
+            response_processed = response
 
         # Merge context and metadata dictionaries; treat non-dict values as empty.
         union_metadata = {}
-        if isinstance(metadata, dict):
-            union_metadata.update(metadata)
+        if isinstance(self.metadata, dict):
+            union_metadata.update(self.metadata)
         if isinstance(metadata_llm, dict):
             union_metadata.update(metadata_llm)
 
@@ -94,12 +94,13 @@ class RagMetricsClient:
         payload = {
             "raw": {
                 "input": input_messages,
-                "output": dump,
+                "output": response_processed,
                 "id": str(uuid.uuid4()),
                 "duration": duration,
                 "caller": self._find_external_caller()
             },
             "metadata": union_metadata,
+            "contexts": contexts,
             "input": None,
             "output": None,
             "expected": None,            
@@ -194,51 +195,52 @@ class RagMetricsClient:
 
         orig_invoke = self._original_llm_invoke(client)
 
-        # Handle chat-based clients (OpenAI)
+        # Chat-based clients (OpenAI)
         if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
             def openai_wrapper(self_instance, *args, **kwargs):
                 start_time = time.time()
                 metadata_llm = kwargs.pop('metadata', None)
+                contexts = kwargs.pop('contexts', None)
                 response = orig_invoke(self_instance, *args, **kwargs)
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
-        # Handle LangChain-style clients that support invoke (class or instance)
+        
+        # LangChain-style clients that support invoke (class or instance)
         elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
             def invoke_wrapper(*args, **kwargs):
                 start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None)
-
-                response = orig_invoke(*args, **kwargs)                
-                
-                input_messages = kwargs.pop('input', None)
-                # if messages is not None:
-                #     input_str = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-                #     kwargs["input"] = input_str
-
+                metadata_llm = kwargs.pop('metadata', None) 
+                contexts = kwargs.pop('contexts', None)
+                response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
+                input_messages = kwargs.pop('input', None)
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
                 return response
             if isinstance(client, type):
                 setattr(client, "invoke", invoke_wrapper)
             else:
                 client.invoke = types.MethodType(invoke_wrapper, client)
-        # Handle lite-style clients (module-level function)
+        
+        # LiteLLM-style clients (module-level function)
         elif hasattr(client, "completion"):
             def lite_wrapper(*args, **kwargs):
                 start_time = time.time()
                 metadata_llm = kwargs.pop('metadata', None)
+                contexts = kwargs.pop('contexts', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata, metadata_llm, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
                 return response
             client.completion = lite_wrapper
+        
+        #Unknown client
         else:
             raise ValueError("Unsupported client")
 

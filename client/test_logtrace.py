@@ -33,17 +33,18 @@ def my_callback(raw_input, raw_output):
 
 # Test OpenAI client (chat-based)
 openai_client = OpenAI()
-ragmetrics.monitor(openai_client, context={"client": "openai"})
+ragmetrics.monitor(openai_client, metadata={"client": "openai"})
 messages = create_messages("OpenAI", "France")
 resp = openai_client.chat.completions.create(
     model="gpt-3.5-turbo",
     messages=messages,
-    metadata={"task": "test", "step": 1}
+    metadata={"client": "OpenAI Native", "step": 1},
+    contexts=["sample context 1", "sample context 2"]
 )
 print(resp)
 
 # Test LiteLLM client (module-level function)
-ragmetrics.monitor(litellm, context={"client": "litellm"})
+ragmetrics.monitor(litellm, metadata={"client": "litellm"})
 messages = create_messages("LiteLLM", "Germany")
 resp = litellm.completion(
     model="gpt-3.5-turbo",
@@ -53,7 +54,7 @@ resp = litellm.completion(
 print(resp)
 
 # Test LangChain-style client
-ragmetrics.monitor(ChatGroq, context={"client": "langchain"}, callback=my_callback)
+ragmetrics.monitor(ChatGroq, metadata={"client": "langchain"}, callback=my_callback)
 langchain_model = ChatGroq(model="llama3-8b-8192")
 messages = create_messages("LangChain", "Italy")
 resp = langchain_model.invoke(
