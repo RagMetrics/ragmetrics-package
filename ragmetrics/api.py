@@ -244,6 +244,61 @@ class RagMetricsClient:
         else:
             raise ValueError("Unsupported client")
 
+class RagMetricsObject:
+    object_type: str = None
+
+    def to_dict(self):
+        """Convert the object into a dict for API payload.
+        Subclasses should implement this."""
+        raise NotImplementedError
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Instantiate an object from API data.
+        Subclasses may override this if needed."""
+        return cls(**data)
+
+    def save(self):
+        """
+        Saves the object using a API endpoint.
+        The endpoint is determined by the object's type.
+        """
+        if not self.object_type:
+            raise ValueError("object_type must be defined.")
+        payload = self.to_dict()
+        # e.g. /api/client/task/save/ or /api/client/dataset/save/
+        endpoint = f"/api/client/{self.object_type}/save/"
+        headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
+        response = ragmetrics_client._make_request(
+            method="post", endpoint=endpoint, json=payload, headers=headers
+        )
+        if response.status_code == 200:
+            json_resp = response.json()
+            self.id = json_resp.get(self.object_type, {}).get("id")
+        else:
+            raise Exception(f"Failed to save {self.object_type}: {response.text}")
+
+    @classmethod
+    def download(cls, id):
+        """
+        Downloads the object from the API using a endpoint.
+        """
+        if not cls.object_type:
+            raise ValueError("object_type must be defined.")
+        endpoint = f"/api/client/{cls.object_type}/download/?id={id}"
+        headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
+        response = ragmetrics_client._make_request(
+            method="get", endpoint=endpoint, headers=headers
+        )
+        if response.status_code == 200:
+            json_resp = response.json()
+            obj_data = json_resp.get(cls.object_type, {})
+            obj = cls.from_dict(obj_data)
+            obj.id = obj_data.get("id")
+            return obj
+        else:
+            raise Exception(f"Failed to download {cls.object_type}: {response.text}")
+        
 # Wrapper calls for simpler calling
 ragmetrics_client = RagMetricsClient()
 
