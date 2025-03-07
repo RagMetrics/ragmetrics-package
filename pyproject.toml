@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ragmetrics-client"
-version = "0.1.6"
-description = "Monitor LLM calls to RagMetrics"
+version = "0.1.7"
+description = "Monitor your LLM calls. Test your LLM app."
 readme = "README.md"
 requires-python = ">=3.6"
 dependencies = [
