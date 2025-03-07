@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel", "build"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ragmetrics-pkg"
-version = "0.1.5"
-description = "A package for integrating RagMetrics with LLM calls"
+name = "ragmetrics-client"
+version = "0.1.6"
+description = "Monitor LLM calls to RagMetrics"
 readme = "README.md"
 requires-python = ">=3.6"
 dependencies = [
@@ -20,3 +20,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
+
+[tool.setuptools.packages.find]
+include = ["ragmetrics", "ragmetrics.*"]
