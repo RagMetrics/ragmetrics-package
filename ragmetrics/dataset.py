@@ -17,9 +17,9 @@ class Example:
 class Dataset(RagMetricsObject):
     object_type = "dataset"
 
-    def __init__(self, examples, name, source_type="", source_file="", questions_qty=0):
-        self.examples = examples 
+    def __init__(self,name, examples = [],  source_type="", source_file="", questions_qty=0):
         self.name = name
+        self.examples = examples 
         self.source_type = source_type
         self.source_file = source_file
         self.questions_qty = questions_qty
@@ -40,8 +40,8 @@ class Dataset(RagMetricsObject):
             for ex in data.get("examples", [])
         ]
         ds = cls(
-            examples,
-            data.get("name", ""),
+            name=data.get("name", ""),
+            examples=examples,
             source_type=data.get("source_type", ""),
             source_file=data.get("source_file", ""),
             questions_qty=data.get("questions_qty", 0)

@@ -279,13 +279,27 @@ class RagMetricsObject:
             raise Exception(f"Failed to save {self.object_type}: {response.text}")
 
     @classmethod
-    def download(cls, id):
+    def download(cls, id=None, name=None):
         """
-        Downloads the object from the API using a endpoint.
+        Downloads the object from the API using an endpoint.
+
+        Examples:
+          - MyObject.download(123) uses 123 as the id.
+          - MyObject.download(name="foo") uses "foo" as the name.
+          - MyObject.download(123, name="foo") uses 123 as the id.
+          
+        Raises an error if neither parameter is provided.
         """
         if not cls.object_type:
             raise ValueError("object_type must be defined.")
-        endpoint = f"/api/client/{cls.object_type}/download/?id={id}"
+        if id is None and name is None:
+            raise ValueError("Either id or name must be provided.")
+        
+        if id is not None:
+            endpoint = f"/api/client/{cls.object_type}/download/?id={id}"
+        else:
+            endpoint = f"/api/client/{cls.object_type}/download/?name={name}"
+        
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
         response = ragmetrics_client._make_request(
             method="get", endpoint=endpoint, headers=headers
