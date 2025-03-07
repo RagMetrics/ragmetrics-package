@@ -39,4 +39,4 @@ resp = openai_client.chat.completions.create(
     messages=[{"role": "user", "content": f"What is the capital of Spain?"}]
 )
 ```
-## Get your key at RagMetrics.ai
+## Get your key and read docs at [RagMetrics.ai](https://ragmetrics.ai/)
