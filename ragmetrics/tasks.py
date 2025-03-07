@@ -3,7 +3,7 @@ from .api import RagMetricsObject  # This is your HTTP client wrapper for RagMet
 class Task(RagMetricsObject):
     object_type = "task" 
 
-    def __init__(self, name, generator_model, system_prompt=""):
+    def __init__(self, name, generator_model="", system_prompt=""):
         self.name = name
         self.generator_model = generator_model
         self.system_prompt = system_prompt

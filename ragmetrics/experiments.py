@@ -1,59 +1,149 @@
 import concurrent.futures
 import requests
 import time
+import json
 from tqdm import tqdm
 from .api import ragmetrics_client  
+from .tasks import Task 
+from .dataset import Dataset  
 
+# --- Cohort Object ---
+class Cohort:
+    def __init__(self, name, generator_model=None, rag_pipeline=None, system_prompt=None):
+
+        self.name = name
+        self.generator_model = generator_model
+        self.rag_pipeline = rag_pipeline
+        self.system_prompt = system_prompt
+
+    def to_dict(self):
+        data = {"name": self.name}
+        if self.generator_model:
+            data["generator_model"] = self.generator_model
+        if self.rag_pipeline:
+            data["rag_pipeline"] = self.rag_pipeline
+        if self.system_prompt:
+            data["system_prompt"] = self.system_prompt
+        return data
+
+# --- Experiment Object ---
 class Experiment:
-    ALLOWED_TYPES = {"Compare models", "Compare prompts", "Advanced"}
-    
-    def __init__(self, name, dataset, task, type, description, criteria, judge_model):
+    def __init__(self, name, dataset, task, cohorts, criteria, judge_model):
         self.name = name
         self.dataset = dataset
         self.task = task
-        self.type = type  # Must be one of the ALLOWED_TYPES
-        self.description = description  # Varies by type
-        self.criteria = criteria  # List of criteria objects (or names)
+        self.cohorts = cohorts   
+        self.criteria = criteria
         self.judge_model = judge_model
 
+    def _process_dataset(self, dataset):
+
+        if isinstance(dataset, Dataset):
+            # Check if full attributes are present.
+            if dataset.name and getattr(dataset, "examples", None) and len(dataset.examples) > 0:
+                # Full dataset provided: save it to get a new id.
+                dataset.save()
+                return dataset.id
+            else:
+                # If only id or name is provided.
+                if getattr(dataset, "id", None):
+                    downloaded = Dataset.download(id=dataset.id)
+                    if downloaded and getattr(downloaded, "id", None):
+                        dataset.id = downloaded.id
+                        return dataset.id
+                elif getattr(dataset, "name", None):
+                    downloaded = Dataset.download(name=dataset.name)
+                    if downloaded and getattr(downloaded, "id", None):
+                        dataset.id = downloaded.id
+                        return dataset.id
+                    else:
+                        raise Exception(f"Dataset with name '{dataset.name}' not found on server.")
+                else:
+                    raise Exception("Dataset object missing required attributes.")
+        elif isinstance(dataset, str):
+            downloaded = Dataset.download(name=dataset)
+            if downloaded and getattr(downloaded, "id", None):
+                return downloaded.id
+            else:
+                raise Exception(f"Dataset not found on server with name: {dataset}")
+        else:
+            raise ValueError("Dataset must be a Dataset object or a string.")
+
+    def _process_task(self, task):
+
+        if isinstance(task, Task):
+            # Check for full attributes: name, system_prompt, and generator_model
+            if task.name  and getattr(task, "generator_model", None):
+                task.save()
+                return task.id
+            else:
+                if getattr(task, "id", None):
+                    downloaded = Task.download(id=task.id)
+                    if downloaded and getattr(downloaded, "id", None):
+                        task.id = downloaded.id
+                        return task.id
+                elif getattr(task, "name", None):
+                    downloaded = Task.download(name=task.name)
+                    if downloaded and getattr(downloaded, "id", None):
+                        task.id = downloaded.id
+                        return task.id
+                    else:
+                        raise Exception(f"Task with name '{task.name}' not found on server.")
+                else:
+                    raise Exception("Task object missing required attributes.")
+        elif isinstance(task, str):
+            downloaded = Task.download(name=task)
+            if downloaded and getattr(downloaded, "id", None):
+                return downloaded.id
+            else:
+                raise Exception(f"Task not found on server with name: {task}")
+        else:
+            raise ValueError("Task must be a Task object or a string.")
+
+    def _process_cohorts(self):
+        """
+        Processes the cohorts parameter:
+          - If a string, assumes it's a JSON string.
+          - If a list, converts each element to a dict (using to_dict() if available).
+        Returns a JSON string.
+        Validates that each cohort contains either "generator_model" or "rag_pipeline" (but not both).
+        """
+        if isinstance(self.cohorts, str):
+            try:
+                cohorts_list = json.loads(self.cohorts)
+            except Exception as e:
+                raise ValueError("Invalid JSON for cohorts: " + str(e))
+        elif isinstance(self.cohorts, list):
+            cohorts_list = []
+            for c in self.cohorts:
+                if hasattr(c, "to_dict"):
+                    cohorts_list.append(c.to_dict())
+                elif isinstance(c, dict):
+                    cohorts_list.append(c)
+                else:
+                    raise ValueError("Each cohort must be a dict or have a to_dict() method.")
+        else:
+            raise ValueError("cohorts must be provided as a JSON string or a list.")
+        
+        for cohort in cohorts_list:
+            if not ("generator_model" in cohort or "rag_pipeline" in cohort):
+                raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline'.")
+            if "generator_model" in cohort and "rag_pipeline" in cohort:
+                raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline', not both.")
+        return json.dumps(cohorts_list)
+
     def _build_payload(self):
-        # Validate experiment type.
-        if self.type not in self.ALLOWED_TYPES:
-            raise ValueError(f"Type must be one of {self.ALLOWED_TYPES}")
-
-        if self.type == "Compare models":
-            if not isinstance(self.description, list) or not all(isinstance(item, str) for item in self.description):
-                raise ValueError("For 'Compare models' type, description must be a list of model names (strings).")
-            cohorts = [{"name": model, "model": model} for model in self.description]
-
-        elif self.type == "Compare prompts":
-            if not isinstance(self.description, list) or not all(
-                isinstance(item, dict) and "name" in item and ("prompt" in item or "system_prompt" in item)
-                for item in self.description
-            ):
-                raise ValueError("For 'Compare prompts' type, description must be a list of dicts with keys 'Name' and 'system_prompt'.")
-            cohorts = []
-            for item in self.description:
-                new_item = item.copy()
-                new_item.setdefault("generator_model", "gpt-4o-mini")
-                cohorts.append(new_item)
-
-        elif self.type == "Advanced":
-            if not isinstance(self.description, list) or not all(isinstance(item, dict) for item in self.description):
-                raise ValueError("For 'Advanced' type, description must be a list of dictionaries.")
-            for item in self.description:
-                if not ("generator_model" in item or "rag_pipeline" in item):
-                    raise ValueError("For 'Advanced' type, each item must include either 'generator_model' or 'rag_pipeline'.")
-            cohorts = self.description
-
+        """
+        Builds the payload to send to the server.
+        """
         payload = {
             "experiment_name": self.name,
-            "dataset": self.dataset,
-            "task": self.task,
-            "exp_type": self.type,
+            "dataset": self._process_dataset(self.dataset),
+            "task": self._process_task(self.task),
+            "exp_type": "advanced",  
             "criteria": self.criteria,
             "judge_model": self.judge_model,
-            "cohorts": cohorts,
+            "cohorts": self._process_cohorts(),
         }
         return payload
 
@@ -73,8 +163,7 @@ class Experiment:
     def run_async(self):
         """
         Submits the experiment asynchronously.
-        Returns a Future that will be fulfilled with the JSON response
-        from the API.
+        Returns a Future that will be fulfilled with the JSON response from the API.
         """
         payload = self._build_payload()
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -86,7 +175,6 @@ class Experiment:
         Runs the experiment and displays real-time progress with enhanced error handling.
         This method wraps the asynchronous run (run_async) with a polling progress bar.
         """
-        # Submit the experiment run asynchronously.
         future_result = self.run_async()
         initial_result = future_result.result()
         
@@ -96,12 +184,10 @@ class Experiment:
         experiment_run_id = initial_result["experiment_run_id"]
         results_url = initial_result["results_url"]
         
-        # Set up progress tracking.
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
         base_url = ragmetrics_client.base_url.rstrip('/')
         progress_url = f"{base_url}/api/experiment/progress/{experiment_run_id}/"
         
-        # Initialize the progress bar using tqdm.
         with tqdm(total=100, desc="Experiment Progress", 
                   bar_format="{l_bar}{bar}| {n_fmt}% [{elapsed}<{remaining}]") as pbar:
             last_progress = 0
@@ -109,36 +195,29 @@ class Experiment:
             
             while True:
                 try:
-                    # Request progress update.
                     response = requests.get(progress_url, headers=headers, timeout=10)
                     response.raise_for_status()
                     progress_data = response.json()
                     
-                    # Handle error states from the API.
                     if progress_data.get('state') == 'FAILED':
                         raise Exception(f"Experiment failed: {progress_data.get('error', 'Unknown error')}")
                     
-                    # Update the progress bar.
                     current_progress = progress_data.get('progress', 0)
                     pbar.update(current_progress - last_progress)
                     last_progress = current_progress
                     
-                    # Display ETA and status if available.
                     if progress_data.get('eta_lower') is not None:
                         pbar.set_postfix({
                             'ETA': f"{progress_data['eta_lower']}-{progress_data['eta_upper']}min",
                             'Status': progress_data.get('description', '')
                         })
                     
-                    # Exit if experiment is complete.
                     if progress_data.get('state') in ['COMPLETED', 'SUCCESS']:
                         pbar.set_postfix({'Status': 'Completed!'})
                         print(f"\nResults available at: {base_url}{results_url}")
                         return progress_data
                     
-                    # Reset retry counter on success.
                     retry_count = 0
-                    
                 except (requests.exceptions.RequestException, ConnectionError) as e:
                     retry_count += 1
                     if retry_count > 3:
