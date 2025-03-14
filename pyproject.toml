@@ -9,13 +9,21 @@ description = "Monitor your LLM calls. Test your LLM app."
 readme = "README.md"
 requires-python = ">=3.6"
 dependencies = [
-    "requests"
+    "requests>=2.20.0"
 ]
 authors = [
     { name = "ragmetrics" }
 ]
+license = { text = "MIT" }
+keywords = ["llm", "evaluation", "monitoring", "rag"]
 urls = { Homepage = "https://ragmetrics.ai", Repository = "https://github.com/RagMetrics/ragmetrics-package" }
 classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"

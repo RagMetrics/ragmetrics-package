@@ -5,7 +5,8 @@ import json
 from tqdm import tqdm
 from .api import ragmetrics_client  
 from .tasks import Task 
-from .dataset import Dataset  
+from .dataset import Dataset 
+from .criteria import Criteria
 
 # --- Cohort Object ---
 class Cohort:
@@ -130,7 +131,61 @@ class Experiment:
                 raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline'.")
             if "generator_model" in cohort and "rag_pipeline" in cohort:
                 raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline', not both.")
-        return json.dumps(cohorts_list)
+        return json.dumps(cohorts_list, indent=4)
+
+    def _process_criteria(self, criteria):
+        """
+        Processes the criteria parameter.
+        Accepts a list of Criteria objects or strings.
+        Returns a list of Criteria IDs.
+        """
+        criteria_ids = []
+        if isinstance(criteria, list):
+            for crit in criteria:
+                if isinstance(crit, Criteria):
+                    if getattr(crit, "id", None):
+                        criteria_ids.append(crit.id)
+                    else:
+                        # Check that required fields are nonempty
+                        if (crit.name and crit.name.strip() and
+                            crit.phase and crit.phase.strip() and
+                            crit.output_type and crit.output_type.strip() and
+                            crit.criteria_type and crit.criteria_type.strip()):
+                            crit.save()
+                            criteria_ids.append(crit.id)
+                        else:
+                            # Otherwise, try to download by name as a reference.
+                            try:
+                                downloaded = Criteria.download(name=crit.name)
+                                if downloaded and getattr(downloaded, "id", None):
+                                    crit.id = downloaded.id
+                                    criteria_ids.append(crit.id)
+                                else:
+                                    raise Exception(f"Criteria with name '{crit.name}' not found on server.")
+                            except Exception as e:
+                                raise Exception(
+                                    f"Criteria '{crit.name}' is missing required attributes (phase, output type, or criteria type) and lookup failed: {str(e)}"
+                                )
+                elif isinstance(crit, str):
+                    try:
+                        downloaded = Criteria.download(name=crit)
+                        if downloaded and getattr(downloaded, "id", None):
+                            criteria_ids.append(downloaded.id)
+                        else:
+                            raise Exception(f"Criteria with name '{crit}' not found on server.")
+                    except Exception as e:
+                        raise Exception(f"Criteria lookup failed for '{crit}': {str(e)}")
+                else:
+                    raise ValueError("Each Criteria must be a Criteriaobject or a string.")
+            return criteria_ids
+        elif isinstance(criteria, str):
+            downloaded = Criteria.download(name=criteria)
+            if downloaded and getattr(downloaded, "id", None):
+                return [downloaded.id]
+            else:
+                raise Exception(f"Criteria not found on server with name: {criteria}")
+        else:
+            raise ValueError("Criteria must be provided as a list of Criteria objects or a string.")
 
     def _build_payload(self):
         """
@@ -141,7 +196,7 @@ class Experiment:
             "dataset": self._process_dataset(self.dataset),
             "task": self._process_task(self.task),
             "exp_type": "advanced",  
-            "criteria": self.criteria,
+            "criteria": self._process_criteria(self.criteria),
             "judge_model": self.judge_model,
             "cohorts": self._process_cohorts(),
         }
@@ -183,13 +238,15 @@ class Experiment:
         
         experiment_run_id = initial_result["experiment_run_id"]
         results_url = initial_result["results_url"]
+        base_url = ragmetrics_client.base_url.rstrip('/')
+        
+        # Print a single status message.
+        print(f'Experiment "{self.name}" is running. Check progress at: {base_url}{results_url}')
         
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
-        base_url = ragmetrics_client.base_url.rstrip('/')
         progress_url = f"{base_url}/api/experiment/progress/{experiment_run_id}/"
         
-        with tqdm(total=100, desc="Experiment Progress", 
-                  bar_format="{l_bar}{bar}| {n_fmt}% [{elapsed}<{remaining}]") as pbar:
+        with tqdm(total=100, desc="Progress", bar_format="{l_bar}{bar}| {n_fmt}%[{elapsed}<{remaining}]") as pbar:
             last_progress = 0
             retry_count = 0
             
@@ -206,15 +263,11 @@ class Experiment:
                     pbar.update(current_progress - last_progress)
                     last_progress = current_progress
                     
-                    if progress_data.get('eta_lower') is not None:
-                        pbar.set_postfix({
-                            'ETA': f"{progress_data['eta_lower']}-{progress_data['eta_upper']}min",
-                            'Status': progress_data.get('description', '')
-                        })
-                    
                     if progress_data.get('state') in ['COMPLETED', 'SUCCESS']:
-                        pbar.set_postfix({'Status': 'Completed!'})
-                        print(f"\nResults available at: {base_url}{results_url}")
+                        pbar.update(100 - last_progress)  
+                        pbar.set_postfix({'Status': 'Finished!'})
+                        pbar.close()  
+                        tqdm.write(f"Finished!")
                         return progress_data
                     
                     retry_count = 0

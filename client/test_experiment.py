@@ -6,7 +6,7 @@ load_dotenv(".env")
 
 # os.environ['RAGMETRICS_API_KEY'] = 'your_ragmetrics_key'
 # Login with the API key from environment
-ragmetrics.login(base_url="http://localhost:8000")
+ragmetrics.login()
 
 from ragmetrics import Cohort, Experiment, Task, Dataset, Example
 

@@ -14,7 +14,7 @@ load_dotenv(".env")
 # os.environ['OPENAI_API_KEY'] = 'your_openai_key'
 
 # Login with the API key from environment
-ragmetrics.login(base_url="http://localhost:8000")
+ragmetrics.login()
 
 def create_messages(client_name, country):
     return [
