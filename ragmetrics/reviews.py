@@ -1,17 +1,26 @@
 from .api import RagMetricsObject
 from .dataset import Dataset 
 from .criteria import Criteria
+from .trace import Trace
 
 class Review(RagMetricsObject):
     object_type = "reviews"
 
-    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None):
+    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None, edit_mode=False, edit_id=None):
         self.name = name
         self.condition = condition
-        self.criteria = criteria 
+        self.criteria = criteria
         self.judge_model = judge_model
         self.dataset = dataset
-        self.id = None
+        self.edit_mode = edit_mode  # If True, we are editing an existing review
+        self.edit_id = edit_id if edit_mode else None  # ID is required when editing
+        self.traces = []
+    
+    def edit(self, id):
+        """Marks the review for editing and assigns an existing ID."""
+        self.edit_mode = True
+        self.edit_id = id
+        return self
 
     def _process_dataset(self, dataset):
 
@@ -108,6 +117,8 @@ class Review(RagMetricsObject):
             "criteria": self._process_criteria(self.criteria),
             "judge_model": self.judge_model,
             "dataset": self._process_dataset(self.dataset),
+            "edit": self.edit_mode,
+            "edit_id": self.edit_id if self.edit_mode else None
         }
 
     @classmethod
@@ -121,4 +132,9 @@ class Review(RagMetricsObject):
             dataset=data.get("dataset", None)
         )
         rq.id = data.get("id")
+        traces_data = data.get("traces", [])
+        rq.traces = [Trace.from_dict(td) for td in traces_data] if traces_data else []
         return rq
+
+    def __iter__(self):
+        return iter(self.traces)
