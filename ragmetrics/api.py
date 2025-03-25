@@ -14,10 +14,26 @@ def default_input(raw_input):
     if not raw_input:
         return None
     if isinstance(raw_input, list):
-        input_str = "\n".join(f"{m['role']}: {m['content']}" for m in raw_input)
+        def format_message(m):
+            if isinstance(m, dict):
+                role = m.get("role", "unknown")
+                content = m.get("content", "")
+            elif hasattr(m, "role") and hasattr(m, "content"):
+                role = getattr(m, "role", "unknown")
+                content = getattr(m, "content", "")
+            else:
+                role = "unknown"
+                content = str(m)
+            return f"{role}: {content}"
+        return "\n".join(format_message(m) for m in raw_input)
+    elif isinstance(raw_input, dict):
+        role = raw_input.get("role", "unknown")
+        content = raw_input.get("content", "")
+        return f"{role}: {content}"
+    elif hasattr(raw_input, "role") and hasattr(raw_input, "content"):
+        return f"{raw_input.role}: {raw_input.content}"
     else:
-        input_str = str(raw_input)
-    return input_str
+        return str(raw_input)
 
 def default_output(raw_response):
     if not raw_response:
@@ -50,6 +66,11 @@ class RagMetricsClient:
         self.base_url = 'https://ragmetrics.ai'
         self.logging_off = False
         self.metadata = None
+        self.conversation_id = str(uuid.uuid4())
+    
+    def new_conversation(self):
+        """Reset the conversation_id to a new UUID."""
+        self.conversation_id = str(uuid.uuid4())
 
     def _find_external_caller(self) -> str:
         """
@@ -66,12 +87,15 @@ class RagMetricsClient:
             frame = frame.f_back
         return external_caller
 
-    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, callback_result=None, **kwargs):
+    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, tools, callback_result=None, **kwargs):
         if self.logging_off:
             return
 
         if not self.access_token:
             raise ValueError("Missing access token. Please log in.")
+        
+        if isinstance(input_messages, list) and len(input_messages) == 1:
+            self.new_conversation()
 
         # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
         if hasattr(response, "model_dump"):
@@ -89,7 +113,7 @@ class RagMetricsClient:
             union_metadata.update(self.metadata)
         if isinstance(metadata_llm, dict):
             union_metadata.update(metadata_llm)
-
+        
         # Construct the payload with placeholders for callback result
         payload = {
             "raw": {
@@ -101,10 +125,12 @@ class RagMetricsClient:
             },
             "metadata": union_metadata,
             "contexts": contexts,
+            "tools": tools,
             "input": None,
             "output": None,
             "expected": None,            
-            "scores": None
+            "scores": None,
+            "conversation_id": self.conversation_id
         }
 
         # Process callback_result if provided
@@ -159,6 +185,7 @@ class RagMetricsClient:
 
         if response.status_code == 200:
             self.access_token = key
+            self.new_conversation()
             return True
         raise ValueError("Invalid access token. Please get a new one at RagMetrics.ai.")
 
@@ -188,6 +215,8 @@ class RagMetricsClient:
             raise ValueError("Missing access token. Please get a new one at RagMetrics.ai.")
         if metadata is not None:
             self.metadata = metadata
+        
+        self.new_conversation()
 
         # Use default callback if none provided.
         if callback is None:
@@ -205,7 +234,8 @@ class RagMetricsClient:
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
+                tools= kwargs.pop('tools', None)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration,tools, callback_result=cb_result, **kwargs)
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
         
