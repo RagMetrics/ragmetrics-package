@@ -60,6 +60,45 @@ def default_callback(raw_input, raw_output) -> dict:
         "output": default_output(raw_output)
     }
 
+def trace_function_call(func):
+    """
+    Decorator to trace function execution and log structured input/output.
+    """
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        duration = time.time() - start_time
+
+        # Prepare structured input format
+        function_input = [
+            {
+                "role": "user",
+                "content": f"{func.__name__} called with args: {json.dumps(args)}, kwargs: {json.dumps(kwargs)}"
+            }
+        ]
+
+        function_output = {
+            "result": result
+        }
+
+        # Log the function execution
+        ragmetrics_client._log_trace(
+            input_messages=function_input,
+            response=function_output,
+            metadata_llm=None,
+            contexts=None,
+            duration=duration,
+            tools=None,  
+            callback_result={
+                "input": function_input, 
+                "output": default_output(function_output)
+            },
+            trace_type="retrieval"
+        )
+        return result
+
+    return wrapper
+
 class RagMetricsClient:
     def __init__(self):
         self.access_token = None
@@ -87,15 +126,16 @@ class RagMetricsClient:
             frame = frame.f_back
         return external_caller
 
-    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, tools, callback_result=None, **kwargs):
+    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, tools, callback_result=None,trace_type = "generation", **kwargs):
         if self.logging_off:
             return
 
         if not self.access_token:
             raise ValueError("Missing access token. Please log in.")
         
-        if isinstance(input_messages, list) and len(input_messages) == 1:
-            self.new_conversation()
+        if trace_type!= "retrieval":
+            if isinstance(input_messages, list) and len(input_messages) == 1:
+                self.new_conversation()
 
         # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
         if hasattr(response, "model_dump"):
@@ -130,7 +170,8 @@ class RagMetricsClient:
             "output": None,
             "expected": None,            
             "scores": None,
-            "conversation_id": self.conversation_id
+            "conversation_id": self.conversation_id,
+            "trace_type":"generation"
         }
 
         # Process callback_result if provided
@@ -138,6 +179,17 @@ class RagMetricsClient:
             if key in callback_result:
                 payload[key] = callback_result[key]
 
+        if (("output" not in payload or payload["output"] is None) and tools is not None):
+            try:
+                trace_type = "tools"
+                if hasattr(response, "choices") and response.choices:
+                    payload["output"] = response.choices[0].message.tool_calls
+                elif isinstance(response, dict) and "choices" in response:
+                    payload["output"] = response["choices"][0]["message"]["tool_calls"]
+            except Exception as e:
+                logger.error("Error extracting tool_calls from response: %s", e)
+        
+        payload["trace_type"] = trace_type
         # Serialize
         payload_str = json.dumps(
             payload, 
