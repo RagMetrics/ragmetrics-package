@@ -12,11 +12,19 @@ class Trace(RagMetricsObject):
         self.raw_output = raw_output
         self.contexts = contexts
         self.metadata = metadata
+        self.edit_mode = False
+
+    def __setattr__(self, key, value):
+        # Automatically enable edit mode when any attribute except 'edit_mode' is changed,
+        # and if id is already set (i.e. an existing trace is being modified).
+        if key not in {"edit_mode"} and hasattr(self, "id") and self.id is not None:
+            object.__setattr__(self, "edit_mode", True)
+        object.__setattr__(self, key, value)
 
     def to_dict(self):
         """Convert the Trace object to a dict for API payload or serialization."""
         return {
-            "id": self.id,
+            "id": self.id if self.edit_mode else None,
             "created_at": self.created_at,
             "input": self.input,
             "output": self.output,
@@ -24,12 +32,13 @@ class Trace(RagMetricsObject):
             "raw_output": self.raw_output,
             "contexts": self.contexts,
             "metadata": self.metadata,
+            "edit": self.edit_mode,
         }
 
     @classmethod
     def from_dict(cls, data: dict):
         """Instantiate a Trace object from a dictionary."""
-        return cls(
+        trace = cls(
             id=data.get("id"),
             created_at=data.get("created_at"),
             input=data.get("input"),
@@ -39,3 +48,5 @@ class Trace(RagMetricsObject):
             contexts=data.get("contexts"),
             metadata=data.get("metadata")
         )
+        trace.edit_mode = False
+        return trace

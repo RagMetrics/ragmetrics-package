@@ -3,24 +3,26 @@ from .dataset import Dataset
 from .criteria import Criteria
 from .trace import Trace
 
-class Review(RagMetricsObject):
+class ReviewQueue(RagMetricsObject):
     object_type = "reviews"
 
-    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None, edit_mode=False, edit_id=None):
+    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None):
         self.name = name
         self.condition = condition
         self.criteria = criteria
         self.judge_model = judge_model
         self.dataset = dataset
-        self.edit_mode = edit_mode  # If True, we are editing an existing review
-        self.edit_id = edit_id if edit_mode else None  # ID is required when editing
+        self.id = None  
         self.traces = []
-    
-    def edit(self, id):
-        """Marks the review for editing and assigns an existing ID."""
-        self.edit_mode = True
-        self.edit_id = id
-        return self
+        self.edit_mode = False  
+
+    def __setattr__(self, key, value):
+        """
+        Automatically enable edit mode if modifying an attribute after id is set.
+        """
+        if key not in {"edit_mode"} and hasattr(self, "id") and self.id:
+            object.__setattr__(self, "edit_mode", True)
+        object.__setattr__(self, key, value)
 
     def _process_dataset(self, dataset):
 
@@ -46,6 +48,12 @@ class Review(RagMetricsObject):
                         raise Exception(f"Dataset with name '{dataset.name}' not found on server.")
                 else:
                     raise Exception("Dataset object missing required attributes.")
+        elif isinstance(dataset, int):
+            downloaded = Dataset.download(id=dataset)
+            if downloaded and getattr(downloaded, "id", None):
+                return downloaded.id
+            else:
+                raise Exception(f"Dataset not found on server with id: {dataset}")
         elif isinstance(dataset, str):
             downloaded = Dataset.download(name=dataset)
             if downloaded and getattr(downloaded, "id", None):
@@ -58,14 +66,14 @@ class Review(RagMetricsObject):
     def _process_criteria(self, criteria):
         """
         Processes the criteria parameter.
-        Accepts a list of Criteria objects or strings.
+        Accepts a list of Criteria objects, dictionaries, integers, or strings.
         Returns a list of Criteria IDs.
         """
         criteria_ids = []
         if isinstance(criteria, list):
             for crit in criteria:
                 if isinstance(crit, Criteria):
-                    if getattr(crit, "id", None):
+                    if crit.id:
                         criteria_ids.append(crit.id)
                     else:
                         # Check that required fields are nonempty
@@ -76,38 +84,52 @@ class Review(RagMetricsObject):
                             crit.save()
                             criteria_ids.append(crit.id)
                         else:
-                            # Otherwise, try to download by name as a reference.
                             try:
                                 downloaded = Criteria.download(name=crit.name)
-                                if downloaded and getattr(downloaded, "id", None):
+                                if downloaded and downloaded.id:
                                     crit.id = downloaded.id
                                     criteria_ids.append(crit.id)
                                 else:
                                     raise Exception(f"Criteria with name '{crit.name}' not found on server.")
                             except Exception as e:
                                 raise Exception(
-                                    f"Criteria '{crit.name}' is missing required attributes (phase, output type, or criteria type) and lookup failed: {str(e)}"
+                                    f"Criteria '{crit.name}' is missing required attributes and lookup failed: {str(e)}"
                                 )
+                elif isinstance(crit, dict):
+                    # Assume the dict represents a Criteria object
+                    try:
+                        c_obj = Criteria.from_dict(crit)
+                        if c_obj.id:
+                            criteria_ids.append(c_obj.id)
+                        else:
+                            c_obj.save()
+                            criteria_ids.append(c_obj.id)
+                    except Exception as e:
+                        raise Exception(f"Failed to process criteria dict: {str(e)}")
+                elif isinstance(crit, int):
+                    # If an integer is provided, assume it's an ID.
+                    criteria_ids.append(crit)
                 elif isinstance(crit, str):
                     try:
                         downloaded = Criteria.download(name=crit)
-                        if downloaded and getattr(downloaded, "id", None):
+                        if downloaded and downloaded.id:
                             criteria_ids.append(downloaded.id)
                         else:
                             raise Exception(f"Criteria with name '{crit}' not found on server.")
                     except Exception as e:
                         raise Exception(f"Criteria lookup failed for '{crit}': {str(e)}")
                 else:
-                    raise ValueError("Each Criteria must be a Criteriaobject or a string.")
+                    raise ValueError("Each Criteria must be a Criteria object, dict, integer, or a string.")
             return criteria_ids
         elif isinstance(criteria, str):
             downloaded = Criteria.download(name=criteria)
-            if downloaded and getattr(downloaded, "id", None):
+            if downloaded and downloaded.id:
                 return [downloaded.id]
             else:
                 raise Exception(f"Criteria not found on server with name: {criteria}")
         else:
-            raise ValueError("Criteria must be provided as a list of Criteria objects or a string.")
+            raise ValueError("Criteria must be provided as a list or a string.")
+
 
     def to_dict(self):
         """Builds the payload to send to the server."""
@@ -118,7 +140,7 @@ class Review(RagMetricsObject):
             "judge_model": self.judge_model,
             "dataset": self._process_dataset(self.dataset),
             "edit": self.edit_mode,
-            "edit_id": self.edit_id if self.edit_mode else None
+            "id": self.id if self.edit_mode else None
         }
 
     @classmethod
