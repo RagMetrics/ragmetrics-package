@@ -13,7 +13,7 @@ class ReviewQueue(RagMetricsObject):
         self.judge_model = judge_model
         self.dataset = dataset
         self.id = None  
-        self.traces = []
+        self._traces = None
         self.edit_mode = False  
 
     def __setattr__(self, key, value):
@@ -23,6 +23,18 @@ class ReviewQueue(RagMetricsObject):
         if key not in {"edit_mode"} and hasattr(self, "id") and self.id:
             object.__setattr__(self, "edit_mode", True)
         object.__setattr__(self, key, value)
+
+    @property
+    def traces(self):
+        """Lazy-loaded property to fetch traces dynamically if not already set."""
+        if self._traces is None:
+            self._traces = Trace.list(review_queue_id=self.id) if self.id else []
+        return self._traces
+
+    @traces.setter
+    def traces(self, value):
+        """Allows manually setting traces when initializing from_dict."""
+        self._traces = value
 
     def _process_dataset(self, dataset):
 
