@@ -287,7 +287,7 @@ class RagMetricsClient:
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
                 tools= kwargs.pop('tools', None)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration,tools, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
         
@@ -299,9 +299,10 @@ class RagMetricsClient:
                 contexts = kwargs.pop('contexts', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
+                tools = kwargs.pop('tools', None)
                 input_messages = kwargs.pop('input', None)
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
                 return response
             if isinstance(client, type):
                 setattr(client, "invoke", invoke_wrapper)
@@ -316,9 +317,10 @@ class RagMetricsClient:
                 contexts = kwargs.pop('contexts', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
+                tools = kwargs.pop('tools', None)
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, callback_result=cb_result, **kwargs)
+                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
                 return response
             client.completion = lite_wrapper
         
