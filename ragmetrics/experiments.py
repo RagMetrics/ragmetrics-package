@@ -25,40 +25,43 @@ class Cohort:
         Note: A cohort must include either generator_model OR rag_pipeline, not both.
         
         Example - Creating model cohorts:
-            ```python
-            # For comparing different models:
-            cohorts = [
-                Cohort(name="GPT-4", generator_model="gpt-4"),
-                Cohort(name="Claude 3 Sonnet", generator_model="claude-3-sonnet-20240229"),
-                Cohort(name="Llama 3", generator_model="llama3-8b-8192")
-            ]
+        
+            .. code-block:: python
             
-            # For comparing different models with custom system prompts:
-            cohorts = [
-                Cohort(
-                    name="GPT-4 with QA Prompt", 
-                    generator_model="gpt-4", 
-                    system_prompt="You are a helpful assistant that answers questions accurately."
-                ),
-                Cohort(
-                    name="GPT-4 with Concise Prompt", 
-                    generator_model="gpt-4", 
-                    system_prompt="Provide extremely concise answers with minimal explanation."
-                )
-            ]
-            ```
+                # For comparing different models:
+                cohorts = [
+                    Cohort(name="GPT-4", generator_model="gpt-4"),
+                    Cohort(name="Claude 3 Sonnet", generator_model="claude-3-sonnet-20240229"),
+                    Cohort(name="Llama 3", generator_model="llama3-8b-8192")
+                ]
+                
+                # For comparing different models with custom system prompts:
+                cohorts = [
+                    Cohort(
+                        name="GPT-4 with QA Prompt", 
+                        generator_model="gpt-4", 
+                        system_prompt="You are a helpful assistant that answers questions accurately."
+                    ),
+                    Cohort(
+                        name="GPT-4 with Concise Prompt", 
+                        generator_model="gpt-4", 
+                        system_prompt="Provide extremely concise answers with minimal explanation."
+                    )
+                ]
             
         Example - Creating RAG pipeline cohorts:
-            ```python
-            # For comparing different RAG approaches:
-            cohorts = [
-                Cohort(name="Basic RAG", rag_pipeline="basic-rag-pipeline"),
-                Cohort(name="Query Rewriting RAG", rag_pipeline="query-rewriting-rag"),
-                Cohort(name="Hypothetical Document Embeddings", rag_pipeline="hyde-rag")
-            ]
-            ```
+        
+            .. code-block:: python
+            
+                # For comparing different RAG approaches:
+                cohorts = [
+                    Cohort(name="Basic RAG", rag_pipeline="basic-rag-pipeline"),
+                    Cohort(name="Query Rewriting RAG", rag_pipeline="query-rewriting-rag"),
+                    Cohort(name="Hypothetical Document Embeddings", rag_pipeline="hyde-rag")
+                ]
 
-        Args:
+    
+    Args:
             name (str): The name of the cohort (e.g., "GPT-4", "RAG-v1").
             generator_model (str, optional): The model identifier to use for generation.
             rag_pipeline (str, optional): The RAG pipeline configuration identifier.
@@ -73,7 +76,8 @@ class Cohort:
         """
         Convert the Cohort instance to a dictionary for API communication.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary containing the cohort's configuration.
         """
         data = {"name": self.name}
@@ -103,120 +107,123 @@ class Experiment:
         Initialize a new Experiment instance.
         
         Example - Basic experiment with existing components:
-            ```python
-            import ragmetrics
-            from ragmetrics import Experiment, Cohort, Dataset, Task, Criteria
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Download existing components by name
-            dataset = Dataset.download(name="Geography QA")
-            task = Task.download(name="Question Answering")
-            
-            # Create cohorts to compare
-            cohorts = [
-                Cohort(name="GPT-4", generator_model="gpt-4"),
-                Cohort(name="Claude 3", generator_model="claude-3-sonnet-20240229")
-            ]
-            
-            # Use existing criteria (by name)
-            criteria = ["Accuracy", "Relevance", "Conciseness"]
-            
-            # Create and run experiment
-            experiment = Experiment(
-                name="Model Comparison - Geography",
-                dataset=dataset,
-                task=task,
-                cohorts=cohorts,
-                criteria=criteria,
-                judge_model="gpt-4"
-            )
-            
-            # Run the experiment and wait for results
-            results = experiment.run()
-            ```
+                import ragmetrics
+                from ragmetrics import Experiment, Cohort, Dataset, Task, Criteria
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Download existing components by name
+                dataset = Dataset.download(name="Geography QA")
+                task = Task.download(name="Question Answering")
+                
+                # Create cohorts to compare
+                cohorts = [
+                    Cohort(name="GPT-4", generator_model="gpt-4"),
+                    Cohort(name="Claude 3", generator_model="claude-3-sonnet-20240229")
+                ]
+                
+                # Use existing criteria (by name)
+                criteria = ["Accuracy", "Relevance", "Conciseness"]
+                
+                # Create and run experiment
+                experiment = Experiment(
+                    name="Model Comparison - Geography",
+                    dataset=dataset,
+                    task=task,
+                    cohorts=cohorts,
+                    criteria=criteria,
+                    judge_model="gpt-4"
+                )
+                
+                # Run the experiment and wait for results
+                results = experiment.run()
         
         Example - Complete experiment creation flow:
-            ```python
-            import ragmetrics
-            from ragmetrics import Experiment, Cohort, Dataset, Task, Criteria, Example
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # 1. Create a dataset
-            examples = [
-                Example(
-                    question="What is the capital of France?",
-                    ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
-                    ground_truth_answer="Paris"
-                ),
-                Example(
-                    question="What is the largest planet in our solar system?",
-                    ground_truth_context="Jupiter is the largest planet in our solar system.",
-                    ground_truth_answer="Jupiter"
+                import ragmetrics
+                from ragmetrics import Experiment, Cohort, Dataset, Task, Criteria, Example
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # 1. Create a dataset
+                examples = [
+                    Example(
+                        question="What is the capital of France?",
+                        ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
+                        ground_truth_answer="Paris"
+                    ),
+                    Example(
+                        question="What is the largest planet in our solar system?",
+                        ground_truth_context="Jupiter is the largest planet in our solar system.",
+                        ground_truth_answer="Jupiter"
+                    )
+                ]
+                dataset = Dataset(name="General Knowledge QA", examples=examples)
+                dataset.save()
+                
+                # 2. Create a task
+                task = Task(
+                    name="General QA Task",
+                    generator_model="gpt-4",
+                    system_prompt="You are a helpful assistant that answers questions accurately."
                 )
-            ]
-            dataset = Dataset(name="General Knowledge QA", examples=examples)
-            dataset.save()
-            
-            # 2. Create a task
-            task = Task(
-                name="General QA Task",
-                generator_model="gpt-4",
-                system_prompt="You are a helpful assistant that answers questions accurately."
-            )
-            task.save()
-            
-            # 3. Create criteria
-            relevance = Criteria(
-                name="Relevance",
-                phase="generation",
-                output_type="5-point",
-                criteria_type="llm_judge",
-                header="How relevant is the response to the question?",
-                likert_score_1="Not relevant at all",
-                likert_score_2="Slightly relevant",
-                likert_score_3="Moderately relevant",
-                likert_score_4="Very relevant",
-                likert_score_5="Completely relevant"
-            )
-            relevance.save()
-            
-            factual = Criteria(
-                name="Factual Accuracy",
-                phase="generation",
-                output_type="bool", 
-                criteria_type="llm_judge",
-                header="Is the answer factually correct?",
-                bool_true="Yes, the answer is factually correct.",
-                bool_false="No, the answer contains factual errors."
-            )
-            factual.save()
-            
-            # 4. Define cohorts
-            cohorts = [
-                Cohort(name="GPT-4", generator_model="gpt-4"),
-                Cohort(name="Claude 3", generator_model="claude-3-sonnet-20240229"),
-                Cohort(name="GPT-3.5", generator_model="gpt-3.5-turbo")
-            ]
-            
-            # 5. Create experiment
-            experiment = Experiment(
-                name="Model Comparison - General Knowledge",
-                dataset=dataset,
-                task=task,
-                cohorts=cohorts,
-                criteria=[relevance, factual],
-                judge_model="gpt-4"
-            )
-            
-            # 6. Run the experiment
-            results = experiment.run()
-            ```
+                task.save()
+                
+                # 3. Create criteria
+                relevance = Criteria(
+                    name="Relevance",
+                    phase="generation",
+                    output_type="5-point",
+                    criteria_type="llm_judge",
+                    header="How relevant is the response to the question?",
+                    likert_score_1="Not relevant at all",
+                    likert_score_2="Slightly relevant",
+                    likert_score_3="Moderately relevant",
+                    likert_score_4="Very relevant",
+                    likert_score_5="Completely relevant"
+                )
+                relevance.save()
+                
+                factual = Criteria(
+                    name="Factual Accuracy",
+                    phase="generation",
+                    output_type="bool", 
+                    criteria_type="llm_judge",
+                    header="Is the answer factually correct?",
+                    bool_true="Yes, the answer is factually correct.",
+                    bool_false="No, the answer contains factual errors."
+                )
+                factual.save()
+                
+                # 4. Define cohorts
+                cohorts = [
+                    Cohort(name="GPT-4", generator_model="gpt-4"),
+                    Cohort(name="Claude 3", generator_model="claude-3-sonnet-20240229"),
+                    Cohort(name="GPT-3.5", generator_model="gpt-3.5-turbo")
+                ]
+                
+                # 5. Create experiment
+                experiment = Experiment(
+                    name="Model Comparison - General Knowledge",
+                    dataset=dataset,
+                    task=task,
+                    cohorts=cohorts,
+                    criteria=[relevance, factual],
+                    judge_model="gpt-4"
+                )
+                
+                # 6. Run the experiment
+                results = experiment.run()
 
-        Args:
+    
+    Args:
             name (str): The name of the experiment.
             dataset (Dataset or str): The dataset to use for evaluation.
             task (Task or str): The task definition to evaluate.
@@ -238,13 +245,16 @@ class Experiment:
         Handles different ways of specifying a dataset (object, name, ID) and ensures
         it exists on the server.
 
-        Args:
+    
+    Args:
             dataset (Dataset or str): The dataset to process.
 
-        Returns:
+    
+    Returns:
             str: The ID of the processed dataset.
 
-        Raises:
+    
+    Raises:
             ValueError: If the dataset is invalid or missing required attributes.
             Exception: If the dataset cannot be found on the server.
         """
@@ -286,13 +296,16 @@ class Experiment:
         Handles different ways of specifying a task (object, name, ID) and ensures
         it exists on the server.
 
-        Args:
+    
+    Args:
             task (Task or str): The task to process.
 
-        Returns:
+    
+    Returns:
             str: The ID of the processed task.
 
-        Raises:
+    
+    Raises:
             ValueError: If the task is invalid or missing required attributes.
             Exception: If the task cannot be found on the server.
         """
@@ -332,10 +345,12 @@ class Experiment:
         Converts the cohorts parameter (list of Cohort objects or JSON string) to
         a JSON string for the API. Validates that each cohort is properly configured.
 
-        Returns:
+    
+    Returns:
             str: JSON string containing the processed cohorts.
 
-        Raises:
+    
+    Raises:
             ValueError: If cohorts are invalid or improperly configured.
         """
         if isinstance(self.cohorts, str):
@@ -369,13 +384,16 @@ class Experiment:
         Handles different ways of specifying criteria (objects, names, IDs) and ensures
         they exist on the server.
 
-        Args:
+    
+    Args:
             criteria (list or str): The criteria to process.
 
-        Returns:
+    
+    Returns:
             list: List of criteria IDs.
 
-        Raises:
+    
+    Raises:
             ValueError: If the criteria are invalid.
             Exception: If criteria cannot be found on the server.
         """
@@ -434,7 +452,8 @@ class Experiment:
         Processes all components of the experiment and constructs the complete
         payload to send to the server.
 
-        Returns:
+    
+    Returns:
             dict: The payload to send to the server.
         """
         payload = {
@@ -454,13 +473,16 @@ class Experiment:
         
         Sends the experiment configuration to the server and handles the response.
 
-        Args:
+    
+    Args:
             payload (dict): The payload to send to the API.
 
-        Returns:
+    
+    Returns:
             dict: The API response.
 
-        Raises:
+    
+    Raises:
             Exception: If the API call fails.
         """
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
@@ -482,7 +504,8 @@ class Experiment:
         Starts the experiment on the server without waiting for it to complete.
         Use this when you want to start an experiment and check its status later.
 
-        Returns:
+    
+    Returns:
             concurrent.futures.Future: A Future object that will contain the API response.
         """
         payload = self._build_payload()
@@ -499,31 +522,35 @@ class Experiment:
         or fails.
         
         Example:
-            ```python
-            # Create the experiment
-            experiment = Experiment(
-                name="Model Comparison",
-                dataset="My Dataset",
-                task="QA Task",
-                cohorts=cohorts,
-                criteria=criteria,
-                judge_model="gpt-4"
-            )
+        
+            .. code-block:: python
             
-            # Run with default polling interval (2 seconds)
-            results = experiment.run()
-            
-            # Or run with custom polling interval
-            results = experiment.run(poll_interval=5)  # Check every 5 seconds
-            ```
+                # Create the experiment
+                experiment = Experiment(
+                    name="Model Comparison",
+                    dataset="My Dataset",
+                    task="QA Task",
+                    cohorts=cohorts,
+                    criteria=criteria,
+                    judge_model="gpt-4"
+                )
+                
+                # Run with default polling interval (2 seconds)
+                results = experiment.run()
+                
+                # Or run with custom polling interval
+                results = experiment.run(poll_interval=5)  # Check every 5 seconds
 
-        Args:
+    
+    Args:
             poll_interval (int): Time between progress checks in seconds (default: 2).
 
-        Returns:
+    
+    Returns:
             dict: The experiment results once completed.
 
-        Raises:
+    
+    Raises:
             Exception: If the experiment fails to start or encounters an error.
         """
         future_result = self.run_async()

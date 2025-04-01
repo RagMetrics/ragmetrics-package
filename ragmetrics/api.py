@@ -17,13 +17,16 @@ def default_input(raw_input):
     Handles various input formats (list of messages, single message object, etc.)
     and converts them into a consistent string representation.
 
+
     Args:
         raw_input: The input to format. Can be a list of messages, a dictionary
                   with role/content keys, an object with role/content attributes,
                   or a primitive value.
 
+
     Returns:
         str: Formatted string representation of the input, or None if input is empty.
+
     """
     if not raw_input:
         return None
@@ -56,9 +59,11 @@ def default_output(raw_response):
     Handles different response formats from various LLM providers and APIs,
     extracting the actual content in a consistent way.
 
+
     Args:
         raw_response: The response object from the LLM. Can be OpenAI ChatCompletion,
                      object with text/content attributes, or another response format.
+
 
     Returns:
         str: The extracted content from the response, or the raw response if content
@@ -89,9 +94,11 @@ def default_callback(raw_input, raw_output) -> dict:
     This is the default callback used by the monitor function when no custom
     callback is provided.
 
+
     Args:
         raw_input: The raw input to the LLM.
         raw_output: The raw output from the LLM.
+
 
     Returns:
         dict: A dictionary containing formatted input and output.
@@ -110,41 +117,45 @@ def trace_function_call(func):
     This is particularly useful for tracking retrieval functions in RAG applications.
 
     Example - Tracing a weather API function:
-        ```python
-        import requests
-        import ragmetrics
-        from ragmetrics import trace_function_call
         
-        # First, login to RagMetrics
-        ragmetrics.login("your-api-key")
+        .. code-block:: python
         
-        # Apply the decorator to your function
-        @trace_function_call
-        def get_weather(latitude, longitude):
-            response = requests.get(
-                f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m"
-            )
-            data = response.json()
-            return data['current']['temperature_2m']
+            import requests
+            import ragmetrics
+            from ragmetrics import trace_function_call
             
-        # Now when you call the function, it's automatically traced
-        temperature = get_weather(48.8566, 2.3522)  # Paris coordinates
-        ```
+            # First, login to RagMetrics
+            ragmetrics.login("your-api-key")
+            
+            # Apply the decorator to your function
+            @trace_function_call
+            def get_weather(latitude, longitude):
+                response = requests.get(
+                    f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m"
+                )
+                data = response.json()
+                return data['current']['temperature_2m']
+                
+            # Now when you call the function, it's automatically traced
+            temperature = get_weather(48.8566, 2.3522)  # Paris coordinates
         
     Example - Tracing a document retrieval function:
-        ```python
-        @trace_function_call
-        def retrieve_documents(query, top_k=3):
-            # Connect to your vector database
-            results = vector_db.search(query, limit=top_k)
-            return [doc.text for doc in results]
+    
+        .. code-block:: python
+        
+            @trace_function_call
+            def retrieve_documents(query, top_k=3):
+                # Connect to your vector database
+                results = vector_db.search(query, limit=top_k)
+                return [doc.text for doc in results]
+                
+            # The function call, arguments, and return value will be logged
+            contexts = retrieve_documents("What is the capital of France?")
             
-        # The function call, arguments, and return value will be logged
-        contexts = retrieve_documents("What is the capital of France?")
-        ```
-            
+
     Args:
         func: The function to be traced.
+
 
     Returns:
         Callable: A wrapped version of the function that logs execution details.
@@ -226,7 +237,8 @@ class RagMetricsClient:
         
         Used internally to identify which user function triggered a logging event.
 
-        Returns:
+    
+    Returns:
             str: The name of the first external function that called into ragmetrics,
                  or an empty string if none is found.
         """
@@ -248,7 +260,8 @@ class RagMetricsClient:
         interactions with LLMs. It handles various formats and includes detailed
         metadata about the interaction.
 
-        Args:
+    
+    Args:
             input_messages: The input messages sent to the LLM (prompts, queries, etc.).
             response: The response received from the LLM.
             metadata_llm: Additional metadata about the LLM and the interaction.
@@ -259,10 +272,12 @@ class RagMetricsClient:
             trace_type: The type of trace - "generation", "retrieval", or "tools" (default: "generation").
             **kwargs: Additional keyword arguments to include in the trace.
 
-        Raises:
+    
+    Raises:
             ValueError: If access token is missing.
 
-        Returns:
+    
+    Returns:
             Response: The API response from logging the trace.
         """
         if self.logging_off:
@@ -360,15 +375,18 @@ class RagMetricsClient:
         authentication. It can use an explicit API key or look for one in the
         RAGMETRICS_API_KEY environment variable.
 
-        Args:
+    
+    Args:
             key: The API key for authentication. Get this from your RagMetrics dashboard.
             base_url: Optional custom base URL for the API (default: https://ragmetrics.ai).
             off: Whether to disable logging entirely (default: False).
 
-        Raises:
+    
+    Raises:
             ValueError: If no API key is provided or if the key is invalid.
 
-        Returns:
+    
+    Returns:
             bool: True if login is successful.
         """
         if off:
@@ -404,13 +422,16 @@ class RagMetricsClient:
         Used internally to identify the correct function to wrap when monitoring
         various types of LLM clients.
 
-        Args:
+    
+    Args:
             client: The LLM client object to analyze.
 
-        Returns:
+    
+    Returns:
             Callable: The original LLM invocation function.
             
-        Raises:
+    
+    Raises:
             ValueError: If the client type is not supported.
         """
         if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
@@ -428,12 +449,14 @@ class RagMetricsClient:
         
         Used internally by various methods to communicate with the RagMetrics API.
 
-        Args:
+    
+    Args:
             endpoint: The API endpoint to call (e.g., "/api/client/login/").
             method: The HTTP method to use (default: "post").
             **kwargs: Additional arguments to pass to the requests library.
 
-        Returns:
+    
+    Returns:
             Response: The HTTP response from the API.
         """
         url = f"{self.base_url}{endpoint}"
@@ -453,16 +476,19 @@ class RagMetricsClient:
         - LangChain (client.invoke)
         - LiteLLM (client.completion)
 
-        Args:
+    
+    Args:
             client: The LLM client to monitor.
             metadata: Additional metadata to include with each logged interaction.
             callback: Optional function to process inputs/outputs before logging.
                      Should accept (input, output) and return a dict with "input" and "output" keys.
 
-        Raises:
+    
+    Raises:
             ValueError: If access token is missing or client type is unsupported.
 
-        Returns:
+    
+    Returns:
             The wrapped client with monitoring enabled.
         """
         if not self.access_token:
@@ -550,10 +576,12 @@ class RagMetricsObject:
         This method must be implemented by subclasses to define how the object
         is serialized for API communication.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary representation of the object.
             
-        Raises:
+    
+    Raises:
             NotImplementedError: If not implemented by a subclass.
         """
         raise NotImplementedError
@@ -566,10 +594,12 @@ class RagMetricsObject:
         This method creates a new instance of the class from data received
         from the API. Subclasses may override this to customize deserialization.
 
-        Args:
+    
+    Args:
             data: Dictionary containing object data.
 
-        Returns:
+    
+    Returns:
             RagMetricsObject: A new instance of the object.
         """
         return cls(**data)
@@ -581,10 +611,12 @@ class RagMetricsObject:
         This method sends the object to the RagMetrics API for storage and
         retrieves the assigned ID.
 
-        Returns:
+    
+    Returns:
             Response: The API response from saving the object.
             
-        Raises:
+    
+    Raises:
             ValueError: If object_type is not defined.
             Exception: If the API request fails.
         """
@@ -610,14 +642,17 @@ class RagMetricsObject:
         
         This method retrieves an object from the RagMetrics API by its ID or name.
 
-        Args:
+    
+    Args:
             id: ID of the object to download (mutually exclusive with name).
             name: Name of the object to download (mutually exclusive with id).
 
-        Returns:
+    
+    Returns:
             RagMetricsObject: The downloaded object instance.
             
-        Raises:
+    
+    Raises:
             ValueError: If neither id nor name is provided, or if object_type is not defined.
             Exception: If the API request fails.
         """
@@ -654,21 +689,23 @@ def login(key=None, base_url=None, off=False):
     This is a convenience function that uses the global client instance.
     
     Example:
-        ```python
-        # Login with explicit API key
-        ragmetrics.login(key="your-api-key")
+    
+        .. code-block:: python
         
-        # Login with environment variable (recommended)
-        import os
-        os.environ['RAGMETRICS_API_KEY'] = 'your-api-key' 
-        ragmetrics.login()
-        
-        # Login with custom base URL (for testing/dev environments)
-        ragmetrics.login(base_url="https://staging.ragmetrics.ai")
-        
-        # Disable logging (useful for testing)
-        ragmetrics.login(off=True)
-        ```
+            # Login with explicit API key
+            ragmetrics.login(key="your-api-key")
+            
+            # Login with environment variable (recommended)
+            import os
+            os.environ['RAGMETRICS_API_KEY'] = 'your-api-key' 
+            ragmetrics.login()
+            
+            # Login with custom base URL (for testing/dev environments)
+            ragmetrics.login(base_url="https://staging.ragmetrics.ai")
+            
+            # Disable logging (useful for testing)
+            ragmetrics.login(off=True)
+
 
     Args:
         key: Optional API key for authentication. If not provided, will check
@@ -676,9 +713,11 @@ def login(key=None, base_url=None, off=False):
         base_url: Optional custom base URL for the API.
         off: Whether to disable logging (default: False).
 
+
     Returns:
         bool: True if login was successful.
         
+
     Raises:
         ValueError: If authentication fails.
     """
@@ -691,73 +730,79 @@ def monitor(client, metadata=None, callback: Optional[Callable[[Any, Any], dict]
     This is a convenience function that uses the global client instance.
     
     Example for OpenAI:
-        ```python
-        import openai
-        import ragmetrics
+    
+        .. code-block:: python
         
-        # Login to RagMetrics
-        ragmetrics.login("your-api-key")
-        
-        # Create a monitored OpenAI client
-        openai_client = ragmetrics.monitor(openai.OpenAI(), metadata={"app": "my-app"})
-        
-        # Use the monitored client as normal - all calls will be logged
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini", 
-            messages=[{"role": "user", "content": "What is the capital of France?"}],
-            metadata={"request_id": "123"}, # Additional request-specific metadata
-            contexts=["Paris is the capital of France"] # Context provided to the LLM
-        )
-        ```
+            import openai
+            import ragmetrics
+            
+            # Login to RagMetrics
+            ragmetrics.login("your-api-key")
+            
+            # Create a monitored OpenAI client
+            openai_client = ragmetrics.monitor(openai.OpenAI(), metadata={"app": "my-app"})
+            
+            # Use the monitored client as normal - all calls will be logged
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini", 
+                messages=[{"role": "user", "content": "What is the capital of France?"}],
+                metadata={"request_id": "123"}, # Additional request-specific metadata
+                contexts=["Paris is the capital of France"] # Context provided to the LLM
+            )
     
     Example for LiteLLM:
-        ```python
-        import litellm
-        import ragmetrics
+    
+        .. code-block:: python
         
-        # Login to RagMetrics
-        ragmetrics.login("your-api-key")
-        
-        # Monitor LiteLLM
-        ragmetrics.monitor(litellm, metadata={"client": "litellm"})
-        
-        # All completions will be logged
-        response = litellm.completion(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "What is the capital of France?"}],
-            metadata={"task": "geography_test"}
-        )
-        ```
+            import litellm
+            import ragmetrics
+            
+            # Login to RagMetrics
+            ragmetrics.login("your-api-key")
+            
+            # Monitor LiteLLM
+            ragmetrics.monitor(litellm, metadata={"client": "litellm"})
+            
+            # All completions will be logged
+            response = litellm.completion(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "What is the capital of France?"}],
+                metadata={"task": "geography_test"}
+            )
         
     Example with custom callback:
-        ```python
-        import openai
-        import ragmetrics
+    
+        .. code-block:: python
         
-        # Define a custom callback to process inputs/outputs before logging
-        def my_callback(raw_input, raw_output):
-            return {
-                "input": raw_input,
-                "output": raw_output,
-                "expected": "Paris" # Optional expected answer for automatic evaluation
-            }
+            import openai
+            import ragmetrics
             
-        # Monitor with custom callback
-        openai_client = ragmetrics.monitor(
-            openai.OpenAI(), 
-            metadata={"app": "qa-system"},
-            callback=my_callback
-        )
-        ```
+            # Define a custom callback to process inputs/outputs before logging
+            def my_callback(raw_input, raw_output):
+                return {
+                    "input": raw_input,
+                    "output": raw_output,
+                    "expected": "Paris" # Optional expected answer for automatic evaluation
+                }
+                
+            # Monitor with custom callback
+            openai_client = ragmetrics.monitor(
+                openai.OpenAI(), 
+                metadata={"app": "qa-system"},
+                callback=my_callback
+            )
+
 
     Args:
         client: The LLM client to monitor.
         metadata: Optional metadata for the monitoring session.
         callback: Optional callback function for custom processing.
 
+
     Returns:
         The wrapped client with monitoring enabled.
         
+
     Raises:
         ValueError: If not logged in or client type is unsupported.
     """

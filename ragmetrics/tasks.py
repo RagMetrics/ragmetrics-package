@@ -23,57 +23,61 @@ class Task(RagMetricsObject):
         Initialize a new Task instance.
         
         Example - Creating a simple QA task:
-            ```python
-            import ragmetrics
-            from ragmetrics import Task
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Create a basic QA task
-            qa_task = Task(
-                name="Question Answering",
-                generator_model="gpt-4",
-                system_prompt="You are a helpful assistant that answers questions accurately and concisely.",
-                prompt_template="Question: {question}\nAnswer:"
-            )
-            
-            # Save the task for future use
-            qa_task.save()
-            ```
+                import ragmetrics
+                from ragmetrics import Task
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Create a basic QA task
+                qa_task = Task(
+                    name="Question Answering",
+                    generator_model="gpt-4",
+                    system_prompt="You are a helpful assistant that answers questions accurately and concisely.",
+                    prompt_template="Question: {question}\nAnswer:"
+                )
+                
+                # Save the task for future use
+                qa_task.save()
         
         Example - Creating a task with advanced parameters:
-            ```python
-            # Task with temperature and token settings for creative writing
-            creative_task = Task(
-                name="Creative Writing Task",
-                generator_model="claude-3-opus-20240229",
-                system_prompt="You are an award-winning novelist with a lyrical style.",
-                prompt_template="Write a short story about {question} in the style of magical realism.",
-                max_tokens=1000,
-                temperature=0.8,
-                stop=["THE END", "###"]
-            )
+        
+            .. code-block:: python
             
-            # Save the task
-            creative_task.save()
-            ```
+                # Task with temperature and token settings for creative writing
+                creative_task = Task(
+                    name="Creative Writing Task",
+                    generator_model="claude-3-opus-20240229",
+                    system_prompt="You are an award-winning novelist with a lyrical style.",
+                    prompt_template="Write a short story about {question} in the style of magical realism.",
+                    max_tokens=1000,
+                    temperature=0.8,
+                    stop=["THE END", "###"]
+                )
+                
+                # Save the task
+                creative_task.save()
             
         Example - Creating a task for RAG evaluation:
-            ```python
-            # RAG evaluation task that includes context
-            rag_task = Task(
-                name="RAG Evaluation",
-                generator_model="gpt-4",
-                system_prompt="Answer the question using only the provided context. If the context doesn't contain the answer, say 'I don't know'.",
-                prompt_template="Context: {context}\n\nQuestion: {question}\n\nAnswer:"
-            )
+        
+            .. code-block:: python
             
-            # Save the task
-            rag_task.save()
-            ```
+                # RAG evaluation task that includes context
+                rag_task = Task(
+                    name="RAG Evaluation",
+                    generator_model="gpt-4",
+                    system_prompt="Answer the question using only the provided context. If the context doesn't contain the answer, say 'I don't know'.",
+                    prompt_template="Context: {context}\n\nQuestion: {question}\n\nAnswer:"
+                )
+                
+                # Save the task
+                rag_task.save()
 
-        Args:
+    
+    Args:
             name (str): The name of the task.
             generator_model (str, optional): Default model for generation if not specified in cohort.
             system_prompt (str, optional): System prompt to use when generating responses.
@@ -95,7 +99,8 @@ class Task(RagMetricsObject):
         """
         Convert the Task instance to a dictionary for API communication.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary containing the task configuration.
         """
         return {
@@ -115,10 +120,12 @@ class Task(RagMetricsObject):
         
         Used internally when downloading tasks from the RagMetrics API.
 
-        Args:
+    
+    Args:
             data (dict): Dictionary containing task information.
 
-        Returns:
+    
+    Returns:
             Task: A new Task instance with the specified data.
         """
         task = cls(
@@ -141,41 +148,47 @@ class Task(RagMetricsObject):
         You must provide either a name or a task_id to identify the task to download.
         
         Example - Download by name:
-            ```python
-            import ragmetrics
-            from ragmetrics import Task
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Download a task by name
-            qa_task = Task.download(name="Question Answering")
-            
-            # Use the downloaded task in an experiment
-            experiment = Experiment(
-                name="Evaluation",
-                dataset=dataset,
-                task=qa_task,
-                # other parameters...
-            )
-            ```
+                import ragmetrics
+                from ragmetrics import Task
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Download a task by name
+                qa_task = Task.download(name="Question Answering")
+                
+                # Use the downloaded task in an experiment
+                experiment = Experiment(
+                    name="Evaluation",
+                    dataset=dataset,
+                    task=qa_task,
+                    # other parameters...
+                )
             
         Example - Download by ID:
-            ```python
-            # Download a task by its ID
-            task = Task.download(task_id="task_1234567890")
-            ```
+        
+            .. code-block:: python
+            
+                # Download a task by its ID
+                task = Task.download(task_id="task_1234567890")
 
-        Args:
+    
+    Args:
             name (str, optional): The name of the task to download.
             task_id (str, optional): The ID of the task to download.
 
-        Returns:
+    
+    Returns:
             Task: The downloaded Task instance.
 
-        Raises:
+    
+    Raises:
             ValueError: If neither name nor task_id is provided, or if the task
                 is not found on the server.
+
         """
         from .api import api_client
         
@@ -207,29 +220,32 @@ class Task(RagMetricsObject):
         If a task with the same name already exists, it will be updated.
         
         Example:
-            ```python
-            import ragmetrics
-            from ragmetrics import Task
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Create a task
-            task = Task(
-                name="Custom QA Task",
-                generator_model="gpt-4",
-                system_prompt="You are a helpful assistant.",
-                prompt_template="Question: {question}\nAnswer:"
-            )
-            
-            # Save the task to the server
-            task.save()
-            ```
+                import ragmetrics
+                from ragmetrics import Task
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Create a task
+                task = Task(
+                    name="Custom QA Task",
+                    generator_model="gpt-4",
+                    system_prompt="You are a helpful assistant.",
+                    prompt_template="Question: {question}\nAnswer:"
+                )
+                
+                # Save the task to the server
+                task.save()
 
-        Returns:
+    
+    Returns:
             str: The ID of the saved task.
 
-        Raises:
+    
+    Raises:
             Exception: If saving fails due to network issues or invalid data.
         """
         from .api import api_client

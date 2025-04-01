@@ -31,84 +31,89 @@ class Criteria(RagMetricsObject):
         Initialize a new Criteria instance.
         
         Example - Creating a 5-point Likert scale criteria:
-            ```python
-            import ragmetrics
-            from ragmetrics import Criteria
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Create a relevance criteria using a 5-point Likert scale
-            relevance = Criteria(
-                name="Relevance",
-                phase="generation",
-                output_type="5-point",
-                criteria_type="llm_judge",
-                header="How relevant is the response to the question?",
-                likert_score_1="Not relevant at all",
-                likert_score_2="Slightly relevant",
-                likert_score_3="Moderately relevant",
-                likert_score_4="Very relevant",
-                likert_score_5="Completely relevant"
-            )
-            relevance.save()
-            ```
+                import ragmetrics
+                from ragmetrics import Criteria
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Create a relevance criteria using a 5-point Likert scale
+                relevance = Criteria(
+                    name="Relevance",
+                    phase="generation",
+                    output_type="5-point",
+                    criteria_type="llm_judge",
+                    header="How relevant is the response to the question?",
+                    likert_score_1="Not relevant at all",
+                    likert_score_2="Slightly relevant",
+                    likert_score_3="Moderately relevant",
+                    likert_score_4="Very relevant",
+                    likert_score_5="Completely relevant"
+                )
+                relevance.save()
             
         Example - Creating a boolean criteria:
-            ```python
-            # Create a factual correctness criteria using a boolean judgment
-            factual = Criteria(
-                name="Factually Correct",
-                phase="generation",
-                output_type="bool",
-                criteria_type="llm_judge",
-                header="Is the response factually correct based on the provided context?",
-                bool_true="Yes, the response is factually correct and consistent with the context",
-                bool_false="No, the response contains factual errors or contradicts the context"
-            )
-            factual.save()
-            ```
+        
+            .. code-block:: python
+            
+                # Create a factual correctness criteria using a boolean judgment
+                factual = Criteria(
+                    name="Factually Correct",
+                    phase="generation",
+                    output_type="bool",
+                    criteria_type="llm_judge",
+                    header="Is the response factually correct based on the provided context?",
+                    bool_true="Yes, the response is factually correct and consistent with the context",
+                    bool_false="No, the response contains factual errors or contradicts the context"
+                )
+                factual.save()
             
         Example - Creating a string matching criteria (automated):
-            ```python
-            # Create an automated criteria that checks if a response contains a date
-            contains_date = Criteria(
-                name="Contains Date",
-                phase="generation",
-                output_type="bool",
-                criteria_type="function",
-                function_name="string_match",
-                match_type="regex_match",
-                match_pattern=r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}",
-                test_string="The event occurred on 12/25/2023",
-                case_sensitive=False
-            )
-            contains_date.save()
-            ```
+        
+            .. code-block:: python
+            
+                # Create an automated criteria that checks if a response contains a date
+                contains_date = Criteria(
+                    name="Contains Date",
+                    phase="generation",
+                    output_type="bool",
+                    criteria_type="function",
+                    function_name="string_match",
+                    match_type="regex_match",
+                    match_pattern=r"\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}",
+                    test_string="The event occurred on 12/25/2023",
+                    case_sensitive=False
+                )
+                contains_date.save()
             
         Example - Creating a custom prompt criteria:
-            ```python
-            # Create a criteria with a custom prompt for more flexible evaluation
-            custom_eval = Criteria(
-                name="Reasoning Quality",
-                phase="generation",
-                output_type="prompt",
-                criteria_type="llm_judge",
-                description="Evaluate the quality of reasoning in the response",
-                prompt=(
-                    "On a scale of 1-10, rate the quality of reasoning in the response.\n"
-                    "Consider these factors:\n"
-                    "- Logical flow of arguments\n"
-                    "- Use of evidence\n"
-                    "- Consideration of alternatives\n"
-                    "- Absence of fallacies\n\n"
-                    "First explain your reasoning, then provide a final score between 1-10."
+        
+            .. code-block:: python
+            
+                # Create a criteria with a custom prompt for more flexible evaluation
+                custom_eval = Criteria(
+                    name="Reasoning Quality",
+                    phase="generation",
+                    output_type="prompt",
+                    criteria_type="llm_judge",
+                    description="Evaluate the quality of reasoning in the response",
+                    prompt=(
+                        "On a scale of 1-10, rate the quality of reasoning in the response.\n"
+                        "Consider these factors:\n"
+                        "- Logical flow of arguments\n"
+                        "- Use of evidence\n"
+                        "- Consideration of alternatives\n"
+                        "- Absence of fallacies\n\n"
+                        "First explain your reasoning, then provide a final score between 1-10."
+                    )
                 )
-            )
-            custom_eval.save()
-            ```
+                custom_eval.save()
 
-        Args:
+    
+    Args:
             name (str): The criteria name (required).
             phase (str): Either "retrieval" or "generation" (default: "").
             description (str): Description for prompt output type (default: "").
@@ -156,53 +161,58 @@ class Criteria(RagMetricsObject):
         You must provide either a name or a criteria_id to identify the criteria to download.
         
         Example - Download by name:
-            ```python
-            import ragmetrics
-            from ragmetrics import Criteria
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Download a common evaluation criteria by name
-            accuracy = Criteria.download(name="Accuracy")
-            
-            # Use the downloaded criteria in an experiment
-            experiment = Experiment(
-                name="Evaluation",
-                dataset=dataset,
-                task=task,
-                cohorts=cohorts,
-                criteria=[accuracy, "Relevance"],  # Mix of objects and names
-                judge_model="gpt-4"
-            )
-            ```
+                import ragmetrics
+                from ragmetrics import Criteria
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Download a common evaluation criteria by name
+                accuracy = Criteria.download(name="Accuracy")
+                
+                # Use the downloaded criteria in an experiment
+                experiment = Experiment(
+                    name="Evaluation",
+                    dataset=dataset,
+                    task=task,
+                    cohorts=cohorts,
+                    criteria=[accuracy, "Relevance"],  # Mix of objects and names
+                    judge_model="gpt-4"
+                )
             
         Example - Download multiple criteria:
-            ```python
-            # Download multiple criteria that you'll use frequently
-            accuracy = Criteria.download(name="Accuracy")
-            relevance = Criteria.download(name="Relevance")
-            helpfulness = Criteria.download(name="Helpfulness")
+        
+            .. code-block:: python
             
-            # Use them in experiments
-            experiment = Experiment(
-                name="Comprehensive Evaluation",
-                dataset=dataset,
-                task=task,
-                cohorts=cohorts,
-                criteria=[accuracy, relevance, helpfulness],
-                judge_model="gpt-4"
-            )
-            ```
+                # Download multiple criteria that you'll use frequently
+                accuracy = Criteria.download(name="Accuracy")
+                relevance = Criteria.download(name="Relevance")
+                helpfulness = Criteria.download(name="Helpfulness")
+                
+                # Use them in experiments
+                experiment = Experiment(
+                    name="Comprehensive Evaluation",
+                    dataset=dataset,
+                    task=task,
+                    cohorts=cohorts,
+                    criteria=[accuracy, relevance, helpfulness],
+                    judge_model="gpt-4"
+                )
 
-        Args:
+    
+    Args:
             name (str, optional): The name of the criteria to download.
             criteria_id (str, optional): The ID of the criteria to download.
 
-        Returns:
+    
+    Returns:
             Criteria: The downloaded Criteria instance.
 
-        Raises:
+    
+    Raises:
             ValueError: If neither name nor criteria_id is provided, or if the criteria
                 is not found on the server.
         """
@@ -236,36 +246,39 @@ class Criteria(RagMetricsObject):
         If a criteria with the same name already exists, it will be updated.
         
         Example - Creating and saving a criteria:
-            ```python
-            import ragmetrics
-            from ragmetrics import Criteria
+        
+            .. code-block:: python
             
-            # Login
-            ragmetrics.login("your-api-key")
-            
-            # Create a criteria for measuring conciseness
-            conciseness = Criteria(
-                name="Conciseness",
-                phase="generation",
-                output_type="5-point",
-                criteria_type="llm_judge",
-                header="How concise is the response?",
-                likert_score_1="Extremely verbose with lots of unnecessary information",
-                likert_score_2="Somewhat verbose with some unnecessary information",
-                likert_score_3="Moderately concise with balanced detail",
-                likert_score_4="Very concise with good information density",
-                likert_score_5="Perfectly concise with no wasted words"
-            )
-            
-            # Save the criteria to use in experiments
-            criteria_id = conciseness.save()
-            print(f"Saved criteria with ID: {criteria_id}")
-            ```
+                import ragmetrics
+                from ragmetrics import Criteria
+                
+                # Login
+                ragmetrics.login("your-api-key")
+                
+                # Create a criteria for measuring conciseness
+                conciseness = Criteria(
+                    name="Conciseness",
+                    phase="generation",
+                    output_type="5-point",
+                    criteria_type="llm_judge",
+                    header="How concise is the response?",
+                    likert_score_1="Extremely verbose with lots of unnecessary information",
+                    likert_score_2="Somewhat verbose with some unnecessary information",
+                    likert_score_3="Moderately concise with balanced detail",
+                    likert_score_4="Very concise with good information density",
+                    likert_score_5="Perfectly concise with no wasted words"
+                )
+                
+                # Save the criteria to use in experiments
+                criteria_id = conciseness.save()
+                print(f"Saved criteria with ID: {criteria_id}")
 
-        Returns:
+    
+    Returns:
             str: The ID of the saved criteria.
 
-        Raises:
+    
+    Raises:
             Exception: If saving fails due to network issues or invalid data.
         """
         from .api import api_client
@@ -294,7 +307,8 @@ class Criteria(RagMetricsObject):
         The specific fields included in the dictionary depend on the criteria's
         output_type and criteria_type.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary representation of the criteria, including all relevant
                  fields based on the output_type and criteria_type.
         """
@@ -338,10 +352,12 @@ class Criteria(RagMetricsObject):
         
         Used internally when downloading criteria from the RagMetrics API.
 
-        Args:
+    
+    Args:
             data (dict): Dictionary containing criteria data.
 
-        Returns:
+    
+    Returns:
             Criteria: A new Criteria instance with the specified data.
         """
         crit = cls(

@@ -15,7 +15,8 @@ class Trace(RagMetricsObject):
         """
         Initialize a new Trace instance.
 
-        Args:
+    
+    Args:
             id (str, optional): Unique identifier of the trace.
             created_at (str, optional): Timestamp when the trace was created.
             input (str, optional): The processed/formatted input to the LLM.
@@ -42,7 +43,8 @@ class Trace(RagMetricsObject):
         This automatically sets edit_mode to True when any attribute (except edit_mode itself)
         is changed on a trace with an existing ID.
         
-        Args:
+    
+    Args:
             key (str): The attribute name.
             value: The value to set.
         """
@@ -56,7 +58,8 @@ class Trace(RagMetricsObject):
         """
         Convert the Trace object to a dictionary for API communication.
         
-        Returns:
+    
+    Returns:
             dict: A dictionary representation of the trace, with edit_mode flag
                  to indicate whether this is an update to an existing trace.
         """
@@ -77,10 +80,12 @@ class Trace(RagMetricsObject):
         """
         Create a Trace instance from a dictionary.
         
-        Args:
+    
+    Args:
             data (dict): Dictionary containing trace information.
             
-        Returns:
+    
+    Returns:
             Trace: A new Trace instance initialized with the provided data.
         """
         trace = cls(

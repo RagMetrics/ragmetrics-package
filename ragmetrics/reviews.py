@@ -18,7 +18,8 @@ class ReviewQueue(RagMetricsObject):
         """
         Initialize a new ReviewQueue instance.
 
-        Args:
+    
+    Args:
             name (str): The name of the review queue.
             condition (str, optional): SQL-like condition to filter traces (default: "").
             criteria (list or str, optional): Evaluation criteria to apply.
@@ -41,7 +42,8 @@ class ReviewQueue(RagMetricsObject):
         This automatically sets edit_mode to True when any attribute (except edit_mode itself)
         is changed on a queue with an existing ID.
         
-        Args:
+    
+    Args:
             key (str): The attribute name.
             value: The value to set.
         """
@@ -56,7 +58,8 @@ class ReviewQueue(RagMetricsObject):
         
         Lazily loads traces from the server if they haven't been loaded yet.
         
-        Returns:
+    
+    Returns:
             list: List of Trace objects in this review queue.
         """
         if self._traces is None:
@@ -68,7 +71,8 @@ class ReviewQueue(RagMetricsObject):
         """
         Set the traces associated with this review queue.
         
-        Args:
+    
+    Args:
             value (list): List of Trace objects to associate with this queue.
         """
         self._traces = value
@@ -80,13 +84,16 @@ class ReviewQueue(RagMetricsObject):
         Converts various dataset representations (object, ID, name) to a dataset ID
         that can be used in API requests.
         
-        Args:
+    
+    Args:
             dataset (Dataset, int, str): The dataset to process.
             
-        Returns:
+    
+    Returns:
             int: The ID of the processed dataset.
             
-        Raises:
+    
+    Raises:
             ValueError: If the dataset is invalid or not found.
             Exception: If the dataset cannot be found on the server.
         """
@@ -134,13 +141,16 @@ class ReviewQueue(RagMetricsObject):
         Converts various criteria representations (object, dict, ID, name) to a list
         of criteria IDs that can be used in API requests.
         
-        Args:
+    
+    Args:
             criteria (list, Criteria, str, int): The criteria to process.
             
-        Returns:
+    
+    Returns:
             list: List of criteria IDs.
             
-        Raises:
+    
+    Raises:
             ValueError: If the criteria are invalid.
             Exception: If criteria cannot be found on the server.
         """
@@ -210,7 +220,8 @@ class ReviewQueue(RagMetricsObject):
         """
         Convert the ReviewQueue to a dictionary for API communication.
         
-        Returns:
+    
+    Returns:
             dict: Dictionary representation of the review queue with all necessary
                  fields for API communication.
         """
@@ -229,10 +240,12 @@ class ReviewQueue(RagMetricsObject):
         """
         Create a ReviewQueue instance from a dictionary.
         
-        Args:
+    
+    Args:
             data (dict): Dictionary containing review queue information.
             
-        Returns:
+    
+    Returns:
             ReviewQueue: A new ReviewQueue instance with the specified data.
         """
         rq = cls(
@@ -251,7 +264,8 @@ class ReviewQueue(RagMetricsObject):
         """
         Make the ReviewQueue iterable over its traces.
         
-        Returns:
+    
+    Returns:
             iterator: An iterator over the review queue's traces.
         """
         return iter(self.traces)

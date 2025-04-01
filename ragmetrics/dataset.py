@@ -16,27 +16,29 @@ class Example:
         Initialize a new Example instance.
         
         Example:
-            ```python
-            # Simple example with string context
-            example = Example(
-                question="What is the capital of France?",
-                ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
-                ground_truth_answer="Paris"
-            )
+        
+            .. code-block:: python
             
-            # Example with a list of context strings
-            example_multi_context = Example(
-                question="Is NYC beautiful?",
-                ground_truth_context=[
-                    "NYC is the biggest city in the east of US.",
-                    "NYC is on the eastern seaboard.",
-                    "NYC is a very beautiful city"
-                ],
-                ground_truth_answer="Yes"
-            )
-            ```
+                # Simple example with string context
+                example = Example(
+                    question="What is the capital of France?",
+                    ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
+                    ground_truth_answer="Paris"
+                )
+                
+                # Example with a list of context strings
+                example_multi_context = Example(
+                    question="Is NYC beautiful?",
+                    ground_truth_context=[
+                        "NYC is the biggest city in the east of US.",
+                        "NYC is on the eastern seaboard.",
+                        "NYC is a very beautiful city"
+                    ],
+                    ground_truth_answer="Yes"
+                )
 
-        Args:
+    
+    Args:
             question (str): The question to be answered.
             ground_truth_context (str or list): The context containing the answer. Can be a string or list of strings.
             ground_truth_answer (str): The expected answer to the question.
@@ -49,7 +51,8 @@ class Example:
         """
         Convert the Example instance into a dictionary for API requests.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary containing the example's question, context, and answer.
         """
         return {
@@ -77,53 +80,56 @@ class Dataset(RagMetricsObject):
         Initialize a new Dataset instance.
         
         Example - Creating and saving a dataset:
-            ```python
-            import ragmetrics
-            from ragmetrics import Example, Dataset
+        
+            .. code-block:: python
             
-            # Login to RagMetrics
-            ragmetrics.login("your-api-key")
-            
-            # Create examples
-            examples = [
-                Example(
-                    question="What is the capital of France?",
-                    ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
-                    ground_truth_answer="Paris"
-                ),
-                Example(
-                    question="Who wrote Hamlet?",
-                    ground_truth_context="Hamlet is a tragedy written by William Shakespeare.",
-                    ground_truth_answer="William Shakespeare"
-                )
-            ]
-            
-            # Create dataset
-            dataset = Dataset(name="Geography and Literature QA", examples=examples)
-            
-            # Save to RagMetrics platform
-            dataset.save()
-            print(f"Dataset saved with ID: {dataset.id}")
-            ```
+                import ragmetrics
+                from ragmetrics import Example, Dataset
+                
+                # Login to RagMetrics
+                ragmetrics.login("your-api-key")
+                
+                # Create examples
+                examples = [
+                    Example(
+                        question="What is the capital of France?",
+                        ground_truth_context="France is a country in Western Europe. Its capital is Paris.",
+                        ground_truth_answer="Paris"
+                    ),
+                    Example(
+                        question="Who wrote Hamlet?",
+                        ground_truth_context="Hamlet is a tragedy written by William Shakespeare.",
+                        ground_truth_answer="William Shakespeare"
+                    )
+                ]
+                
+                # Create dataset
+                dataset = Dataset(name="Geography and Literature QA", examples=examples)
+                
+                # Save to RagMetrics platform
+                dataset.save()
+                print(f"Dataset saved with ID: {dataset.id}")
             
         Example - Downloading and using an existing dataset:
-            ```python
-            # Download dataset by name
-            dataset = Dataset.download(name="Geography and Literature QA")
+        
+            .. code-block:: python
             
-            # Or download by ID
-            # dataset = Dataset.download(id=12345)
-            
-            # Iterate through examples
-            for example in dataset:
-                print(f"Question: {example.question}")
-                print(f"Answer: {example.ground_truth_answer}")
+                # Download dataset by name
+                dataset = Dataset.download(name="Geography and Literature QA")
                 
-            # Access example count
-            print(f"Dataset contains {len(dataset.examples)} examples")
-            ```
+                # Or download by ID
+                # dataset = Dataset.download(id=12345)
+                
+                # Iterate through examples
+                for example in dataset:
+                    print(f"Question: {example.question}")
+                    print(f"Answer: {example.ground_truth_answer}")
+                    
+                # Access example count
+                print(f"Dataset contains {len(dataset.examples)} examples")
 
-        Args:
+    
+    Args:
             name (str): The name of the dataset.
             examples (list): List of Example instances (default: []).
             source_type (str): Type of the data source (default: "").
@@ -141,7 +147,8 @@ class Dataset(RagMetricsObject):
         """
         Convert the Dataset instance into a dictionary for API communication.
 
-        Returns:
+    
+    Returns:
             dict: Dictionary containing the dataset name, source, examples, and quantity.
         """
         return {
@@ -158,10 +165,12 @@ class Dataset(RagMetricsObject):
         
         Used internally when downloading datasets from the RagMetrics API.
 
-        Args:
+    
+    Args:
             data (dict): Dictionary containing dataset information.
 
-        Returns:
+    
+    Returns:
             Dataset: A new Dataset instance with the specified data.
         """
         examples = [
@@ -185,13 +194,15 @@ class Dataset(RagMetricsObject):
         This allows using a dataset in a for loop to iterate through examples.
         
         Example:
-            ```python
-            dataset = Dataset.download(name="my-dataset")
-            for example in dataset:
-                print(example.question)
-            ```
+        
+            .. code-block:: python
+            
+                dataset = Dataset.download(name="my-dataset")
+                for example in dataset:
+                    print(example.question)
 
-        Returns:
+    
+    Returns:
             iterator: An iterator over the dataset's examples.
         """
         return iter(self.examples)
