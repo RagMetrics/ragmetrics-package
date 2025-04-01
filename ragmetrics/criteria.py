@@ -101,12 +101,13 @@ class Criteria(RagMetricsObject):
                     criteria_type="llm_judge",
                     description="Evaluate the quality of reasoning in the response",
                     prompt=(
-                        "On a scale of 1-10, rate the quality of reasoning in the response.\n"
-                        "Consider these factors:\n"
-                        "- Logical flow of arguments\n"
-                        "- Use of evidence\n"
-                        "- Consideration of alternatives\n"
-                        "- Absence of fallacies\n\n"
+                        "On a scale of 1-10, rate the quality of reasoning in the response."
+                        "Consider these factors:"
+                        "* Logical flow of arguments"
+                        "* Use of evidence"
+                        "* Consideration of alternatives"
+                        "* Absence of fallacies"
+                        
                         "First explain your reasoning, then provide a final score between 1-10."
                     )
                 )

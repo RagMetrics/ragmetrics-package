@@ -1,8 +1,5 @@
 """
-RagMetrics Python Client
-========================
-
-A comprehensive toolkit for developing and monitoring LLM applications:
+``ragmetrics-client`` is a python package that offers a comprehensive toolkit for developing and monitoring LLM applications:
 
 * Monitoring LLM applications in production
 * Evaluating LLM responses with custom criteria
@@ -15,13 +12,17 @@ Main Components
 
 * **login**: Authenticate with the RagMetrics API
 * **monitor**: Wrap LLM clients to automatically log interactions
-* **trace_function_call**: Decorator to trace function execution
-* **Dataset/Example**: Classes for managing evaluation datasets
-* **Task**: Define evaluation tasks
-* **Experiment/Cohort**: Run controlled experiments
-* **Criteria**: Define evaluation criteria
-* **ReviewQueue**: Manage human reviews of LLM interactions
-* **Trace**: Access and manipulate logged interactions
+* **trace_function_call**: Decorator to trace function execution for tracking retrieval in RAG pipelines
+
+Core API Functions:
+* **Cohort**: Run controlled experiments to group and compare different LLM or RAG implementations
+* **Criteria**: Define custom evaluation criteria for assessing model responses
+* **Dataset**: Classes for managing evaluation datasets with questions, contexts, and ground truth answers
+* **Example**: Define individual test cases with questions, contexts, and ground truth answers
+* **Experiment**: Run controlled experiments to compare different LLM or RAG implementations
+* **ReviewQueue**: Manage human reviews of LLM interactions with configurable workflows
+* **Task**: Define evaluation tasks with specific criteria and parameters
+* **Trace**: Access and manipulate logged interactions, including inputs, outputs, and metadata
 """
 
 from ragmetrics.api import login, monitor, trace_function_call

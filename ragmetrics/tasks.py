@@ -234,7 +234,8 @@ class Task(RagMetricsObject):
                     name="Custom QA Task",
                     generator_model="gpt-4",
                     system_prompt="You are a helpful assistant.",
-                    prompt_template="Question: {question}\nAnswer:"
+                    prompt_template="Question: {question}"
+                    "Answer:"
                 )
                 
                 # Save the task to the server

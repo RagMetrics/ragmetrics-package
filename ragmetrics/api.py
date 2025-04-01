@@ -202,10 +202,10 @@ class RagMetricsClient:
     This class handles authentication, request management, and logging of LLM interactions.
     It provides the core functionality for monitoring LLMs and RAG systems, including:
     
-    - Authenticating with the RagMetrics API
-    - Logging LLM interactions (inputs, outputs, context, metadata)
-    - Tracking conversation sessions
-    - Wrapping various LLM clients (OpenAI, LangChain, etc.) for monitoring
+    * Authenticating with the RagMetrics API
+    * Logging LLM interactions (inputs, outputs, context, metadata)
+    * Tracking conversation sessions
+    * Wrapping various LLM clients (OpenAI, LangChain, etc.) for monitoring
     """
 
     def __init__(self):
@@ -472,9 +472,9 @@ class RagMetricsClient:
         logged to RagMetrics.
         
         Supported client types:
-        - OpenAI API clients (client.chat.completions.create)
-        - LangChain (client.invoke)
-        - LiteLLM (client.completion)
+        * OpenAI API clients (client.chat.completions.create)
+        * LangChain (client.invoke)
+        * LiteLLM (client.completion)
 
     
     Args:
