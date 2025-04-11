@@ -102,7 +102,7 @@ class Experiment:
     in RagMetrics.
     """
 
-    def __init__(self, name, dataset, task, cohorts, criteria, judge_model):
+    def __init__(self, name, dataset, task, cohorts, criteria, judge_model, function=None):
         """
         Initialize a new Experiment instance.
         
@@ -237,6 +237,8 @@ class Experiment:
         self.cohorts = cohorts   
         self.criteria = criteria
         self.judge_model = judge_model
+        self.function = function
+        self._downloaded_dataset = None
 
     def _process_dataset(self, dataset):
         """
@@ -263,6 +265,7 @@ class Experiment:
             if dataset.name and getattr(dataset, "examples", None) and len(dataset.examples) > 0:
                 # Full dataset provided: save it to get a new id.
                 dataset.save()
+                self._downloaded_dataset = dataset
                 return dataset.id
             else:
                 # If only id or name is provided.
@@ -270,11 +273,13 @@ class Experiment:
                     downloaded = Dataset.download(id=dataset.id)
                     if downloaded and getattr(downloaded, "id", None):
                         dataset.id = downloaded.id
+                        self._downloaded_dataset = downloaded
                         return dataset.id
                 elif getattr(dataset, "name", None):
                     downloaded = Dataset.download(name=dataset.name)
                     if downloaded and getattr(downloaded, "id", None):
                         dataset.id = downloaded.id
+                        self._downloaded_dataset = downloaded
                         return dataset.id
                     else:
                         raise Exception(f"Dataset with name '{dataset.name}' not found on server.")
@@ -283,6 +288,7 @@ class Experiment:
         elif isinstance(dataset, str):
             downloaded = Dataset.download(name=dataset)
             if downloaded and getattr(downloaded, "id", None):
+                self._downloaded_dataset = downloaded
                 return downloaded.id
             else:
                 raise Exception(f"Dataset not found on server with name: {dataset}")
@@ -444,6 +450,28 @@ class Experiment:
                 raise Exception(f"Criteria not found on server with name: {criteria}")
         else:
             raise ValueError("Criteria must be provided as a list of Criteria objects or a string.")
+        
+    def _process_function(self, function):
+        """
+        Process and execute the function parameter.
+        If a callable is provided, run it on each row of the already downloaded dataset,
+        and return a tuple of (function_name, function_output_list).
+        If a string is provided, return it and no output.
+        """
+        if function is None:
+            return None, None
+        if callable(function):
+            function_name = function.__name__
+            if self._downloaded_dataset is None:
+                raise Exception("Dataset not available")
+            outputs = []
+            for row in self._downloaded_dataset:
+                outputs.append(function(row))
+            return function_name, outputs
+        elif isinstance(function, str):
+            return function, None
+        else:
+            raise ValueError("Function must be a callable or a string.")
 
     def _build_payload(self):
         """
@@ -465,6 +493,11 @@ class Experiment:
             "judge_model": self.judge_model,
             "cohorts": self._process_cohorts(),
         }
+        func_name, func_output = self._process_function(self.function)
+        if func_name is not None:
+            payload["function"] = func_name
+        if func_output is not None:
+            payload["function_output"] = func_output
         return payload
 
     def _call_api(self, payload):
