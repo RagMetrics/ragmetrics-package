@@ -20,7 +20,7 @@ tests/screenshots/
 tmp/
 
 #Virtual Environment
-client-env/
+env/
 
 #VS Code
 .vscode/
