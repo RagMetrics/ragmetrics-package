@@ -7,6 +7,7 @@ from .api import ragmetrics_client
 from .tasks import Task 
 from .dataset import Dataset 
 from .criteria import Criteria
+from .utils import import_function
 
 # --- Cohort Object ---
 class Cohort:
@@ -18,11 +19,11 @@ class Cohort:
     allow comparing different setups against the same dataset and criteria.
     """
 
-    def __init__(self, name, generator_model=None, rag_pipeline=None, system_prompt=None):
+    def __init__(self, name, generator_model=None, rag_pipeline=None, system_prompt=None, function=None):
         """
         Initialize a new Cohort instance.
         
-        Note: A cohort must include either generator_model OR rag_pipeline, not both.
+        Note: A cohort must include exactly one of: generator_model, rag_pipeline, or function_name.
         
         Example - Creating model cohorts:
         
@@ -59,6 +60,23 @@ class Cohort:
                     Cohort(name="Query Rewriting RAG", rag_pipeline="query-rewriting-rag"),
                     Cohort(name="Hypothetical Document Embeddings", rag_pipeline="hyde-rag")
                 ]
+                
+        Example - Creating function cohorts:
+        
+            .. code-block:: python
+            
+                # For using a local function with string reference:
+                cohorts = [
+                    Cohort(name="My Function", function_name="my_module.my_function")
+                ]
+                
+                # For using a local function with callable:
+                def my_processor(example):
+                    return {"generated_answer": "Some response"}
+                    
+                cohorts = [
+                    Cohort(name="My Processor", function_name=my_processor)
+                ]
 
     
     Args:
@@ -66,19 +84,26 @@ class Cohort:
             generator_model (str, optional): The model identifier to use for generation.
             rag_pipeline (str, optional): The RAG pipeline configuration identifier.
             system_prompt (str, optional): Override system prompt to use with this cohort.
+            function (callable or str, optional): Function to use for local execution instead of an API call.
+                Can be a callable function or a string in the format "module.submodule.function_name".
+                The function should take an Example object and return a dictionary with generated outputs.
+                If None is provided, no function will be used.
         """
         self.name = name
         self.generator_model = generator_model
         self.rag_pipeline = rag_pipeline
         self.system_prompt = system_prompt
-
+        self.function = import_function(function)
+        
     def to_dict(self):
         """
         Convert the Cohort instance to a dictionary for API communication.
+        
+        Note: For function-based cohorts, if function is a string it will be included in the output.
+        If function is a callable object, the function name will be included.
 
-    
-    Returns:
-            dict: Dictionary containing the cohort's configuration.
+        Returns:
+            dict: Dictionary containing the cohort's configuration for API use.
         """
         data = {"name": self.name}
         if self.generator_model:
@@ -87,7 +112,29 @@ class Cohort:
             data["rag_pipeline"] = self.rag_pipeline
         if self.system_prompt:
             data["system_prompt"] = self.system_prompt
+        if self.function:
+            if isinstance(self.function, str):
+                data["function"] = self.function
+            elif callable(self.function):
+                data["function"] = self.function.__name__
         return data
+
+    def __str__(self):
+        """Return a human-readable string representation of the cohort."""
+        if isinstance(self.function, str):
+            return f"Cohort('{self.name}', function='{self.function}')"
+        elif callable(self.function):
+            return f"Cohort('{self.name}', function='{self.function.__name__}')"
+        elif self.generator_model:
+            return f"Cohort('{self.name}', model='{self.generator_model}')"
+        elif self.rag_pipeline:
+            return f"Cohort('{self.name}', pipeline='{self.rag_pipeline}')"
+        else:
+            return f"Cohort('{self.name}')"
+    
+    def __repr__(self):
+        """Return a string representation of the cohort for debugging."""
+        return self.__str__()
 
 # --- Experiment Object ---
 class Experiment:
@@ -102,7 +149,7 @@ class Experiment:
     in RagMetrics.
     """
 
-    def __init__(self, name, dataset, task, cohorts, criteria, judge_model):
+    def __init__(self, name, dataset, task, criteria, judge_model, cohorts=None):
         """
         Initialize a new Experiment instance.
         
@@ -134,9 +181,9 @@ class Experiment:
                     name="Model Comparison - Geography",
                     dataset=dataset,
                     task=task,
-                    cohorts=cohorts,
                     criteria=criteria,
-                    judge_model="gpt-4"
+                    judge_model="gpt-4",
+                    cohorts=cohorts  # Optional - will be auto-created from task if not provided
                 )
                 
                 # Run the experiment and wait for results
@@ -202,24 +249,44 @@ class Experiment:
                 )
                 factual.save()
                 
-                # 4. Define cohorts
+                # 4. Define cohorts (optional)
                 cohorts = [
                     Cohort(name="GPT-4", generator_model="gpt-4"),
                     Cohort(name="Claude 3", generator_model="claude-3-sonnet-20240229"),
                     Cohort(name="GPT-3.5", generator_model="gpt-3.5-turbo")
                 ]
                 
-                # 5. Create experiment
+                # 5. Create experiment (with optional cohorts)
                 experiment = Experiment(
                     name="Model Comparison - General Knowledge",
                     dataset=dataset,
                     task=task,
-                    cohorts=cohorts,
                     criteria=[relevance, factual],
-                    judge_model="gpt-4"
+                    judge_model="gpt-4",
+                    cohorts=cohorts  # Optional - will be auto-created from task if not provided
                 )
                 
                 # 6. Run the experiment
+                results = experiment.run()
+                
+        Example - Experiment with default cohort from task:
+        
+            .. code-block:: python
+            
+                # Create experiment without specifying cohorts
+                # A default cohort will be created based on the task's function or generator_model
+                experiment = Experiment(
+                    name="Auto Cohort Example",
+                    dataset=dataset,
+                    task=task,
+                    criteria=criteria,
+                    judge_model="gpt-4"
+                    # cohorts parameter omitted - will create default cohort from task
+                )
+                
+                # Print cohorts that were automatically created
+                print(experiment.cohorts)
+                
                 results = experiment.run()
 
     
@@ -227,17 +294,30 @@ class Experiment:
             name (str): The name of the experiment.
             dataset (Dataset or str): The dataset to use for evaluation.
             task (Task or str): The task definition to evaluate.
-            cohorts (list or str): List of cohorts to evaluate, or JSON string.
             criteria (list or str): List of evaluation criteria.
             judge_model (str): The model to use for judging responses.
+            cohorts (list or str, optional): List of cohorts to evaluate, or JSON string.
+                If not provided, a default cohort will be created based on the task configuration.
         """
         self.name = name
-        self.dataset = dataset
-        self.task = task
-        self.cohorts = cohorts   
-        self.criteria = criteria
         self.judge_model = judge_model
-
+        self._downloaded_dataset = None
+        self._downloaded_task = None
+        
+        # Process in order of dependency
+        # 1. Process dataset - returns the processed Dataset object
+        self.dataset = self._process_dataset(dataset)
+        
+        # 2. Process task - returns the processed Task object
+        self.task = self._process_task(task)
+        
+        # 3. Process criteria - returns a list of processed Criteria objects
+        self.criteria = self._process_criteria(criteria)
+        
+        # 4. Process cohorts - returns a list of processed Cohort objects
+        # If cohorts is None, default cohorts will be created based on task
+        self.cohorts = self._process_cohorts(cohorts)
+    
     def _process_dataset(self, dataset):
         """
         Process and validate the dataset parameter.
@@ -245,16 +325,13 @@ class Experiment:
         Handles different ways of specifying a dataset (object, name, ID) and ensures
         it exists on the server.
 
-    
-    Args:
+        Args:
             dataset (Dataset or str): The dataset to process.
 
-    
-    Returns:
-            str: The ID of the processed dataset.
+        Returns:
+            Dataset: The processed dataset object with ID populated.
 
-    
-    Raises:
+        Raises:
             ValueError: If the dataset is invalid or missing required attributes.
             Exception: If the dataset cannot be found on the server.
         """
@@ -263,19 +340,20 @@ class Experiment:
             if dataset.name and getattr(dataset, "examples", None) and len(dataset.examples) > 0:
                 # Full dataset provided: save it to get a new id.
                 dataset.save()
-                return dataset.id
+                self._downloaded_dataset = dataset
+                return dataset
             else:
                 # If only id or name is provided.
                 if getattr(dataset, "id", None):
                     downloaded = Dataset.download(id=dataset.id)
                     if downloaded and getattr(downloaded, "id", None):
-                        dataset.id = downloaded.id
-                        return dataset.id
+                        self._downloaded_dataset = downloaded
+                        return downloaded
                 elif getattr(dataset, "name", None):
                     downloaded = Dataset.download(name=dataset.name)
                     if downloaded and getattr(downloaded, "id", None):
-                        dataset.id = downloaded.id
-                        return dataset.id
+                        self._downloaded_dataset = downloaded
+                        return downloaded
                     else:
                         raise Exception(f"Dataset with name '{dataset.name}' not found on server.")
                 else:
@@ -283,7 +361,8 @@ class Experiment:
         elif isinstance(dataset, str):
             downloaded = Dataset.download(name=dataset)
             if downloaded and getattr(downloaded, "id", None):
-                return downloaded.id
+                self._downloaded_dataset = downloaded
+                return downloaded
             else:
                 raise Exception(f"Dataset not found on server with name: {dataset}")
         else:
@@ -296,35 +375,35 @@ class Experiment:
         Handles different ways of specifying a task (object, name, ID) and ensures
         it exists on the server.
 
-    
-    Args:
+        Args:
             task (Task or str): The task to process.
 
-    
-    Returns:
-            str: The ID of the processed task.
+        Returns:
+            Task: The processed task object with ID populated.
 
-    
-    Raises:
+        Raises:
             ValueError: If the task is invalid or missing required attributes.
             Exception: If the task cannot be found on the server.
         """
         if isinstance(task, Task):
             # Check for full attributes: name, system_prompt, and generator_model
-            if task.name  and getattr(task, "generator_model", None):
+            if task.name \
+                and (getattr(task, "generator_model", None) or 
+                     getattr(task, "function", None)):
                 task.save()
-                return task.id
+                self._downloaded_task = task
+                return task
             else:
                 if getattr(task, "id", None):
                     downloaded = Task.download(id=task.id)
                     if downloaded and getattr(downloaded, "id", None):
-                        task.id = downloaded.id
-                        return task.id
+                        self._downloaded_task = downloaded
+                        return downloaded
                 elif getattr(task, "name", None):
                     downloaded = Task.download(name=task.name)
                     if downloaded and getattr(downloaded, "id", None):
-                        task.id = downloaded.id
-                        return task.id
+                        self._downloaded_task = downloaded
+                        return downloaded
                     else:
                         raise Exception(f"Task with name '{task.name}' not found on server.")
                 else:
@@ -332,50 +411,72 @@ class Experiment:
         elif isinstance(task, str):
             downloaded = Task.download(name=task)
             if downloaded and getattr(downloaded, "id", None):
-                return downloaded.id
+                self._downloaded_task = downloaded
+                return downloaded
             else:
                 raise Exception(f"Task not found on server with name: {task}")
         else:
             raise ValueError("Task must be a Task object or a string.")
 
-    def _process_cohorts(self):
+    def _process_cohorts(self, cohorts):
         """
         Process and validate the cohorts parameter.
         
-        Converts the cohorts parameter (list of Cohort objects or JSON string) to
-        a JSON string for the API. Validates that each cohort is properly configured.
+        Converts the cohorts parameter (list of Cohort objects, dictionaries, or JSON string)
+        to a properly formatted list of Cohort objects.
+        
+        If no cohorts are provided, creates a default cohort:
+        - If task has a function, creates a cohort with name=function_name and function=function
+        - If task has a generator_model, creates a cohort with name=generator_model and generator_model=generator_model
 
-    
-    Returns:
-            str: JSON string containing the processed cohorts.
-
-    
-    Raises:
+        Args:
+            cohorts (list, str, or None): Cohorts to process, or None to create default cohorts
+            
+        Returns:
+            list: List of processed Cohort objects
+            
+        Raises:
             ValueError: If cohorts are invalid or improperly configured.
         """
-        if isinstance(self.cohorts, str):
+        
+        if not cohorts:
+            # Use the _cohorts_default method to create default cohorts
+            return self._cohorts_default()      
+        
+        if isinstance(cohorts, str):
             try:
-                cohorts_list = json.loads(self.cohorts)
+                cohorts_list_dicts = json.loads(cohorts)
+                # Convert dictionaries to Cohort objects
+                cohorts_list = [Cohort(**c) for c in cohorts_list_dicts]
             except Exception as e:
                 raise ValueError("Invalid JSON for cohorts: " + str(e))
-        elif isinstance(self.cohorts, list):
+        elif isinstance(cohorts, list):
             cohorts_list = []
-            for c in self.cohorts:
-                if hasattr(c, "to_dict"):
-                    cohorts_list.append(c.to_dict())
-                elif isinstance(c, dict):
+            
+            for c in cohorts:
+                if isinstance(c, Cohort):
                     cohorts_list.append(c)
+                elif isinstance(c, dict):
+                    cohort_obj = Cohort(**c)
+                    cohorts_list.append(cohort_obj)
                 else:
-                    raise ValueError("Each cohort must be a dict or have a to_dict() method.")
+                    raise ValueError("Each cohort must be a Cohort object or a dict.")
         else:
             raise ValueError("cohorts must be provided as a JSON string or a list.")
         
+        # Validate that cohorts have the required fields
         for cohort in cohorts_list:
-            if not ("generator_model" in cohort or "rag_pipeline" in cohort):
-                raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline'.")
-            if "generator_model" in cohort and "rag_pipeline" in cohort:
-                raise ValueError("Each cohort must include either 'generator_model' or 'rag_pipeline', not both.")
-        return json.dumps(cohorts_list, indent=4)
+            cohort_dict = cohort.to_dict()
+            # For API calls, each cohort needs at least one of these fields
+            if not any(key in cohort_dict for key in ["generator_model", "rag_pipeline", "function"]):
+                raise ValueError("Each cohort must include either 'generator_model', 'rag_pipeline', or 'function'.")
+            
+            # For API calls, cohorts should not have multiple main fields
+            main_keys = ["generator_model", "rag_pipeline", "function"]
+            if sum(key in cohort_dict for key in main_keys) > 1:
+                raise ValueError("Each cohort should include only one of ['generator_model', 'rag_pipeline', 'function']")
+            
+        return cohorts_list
 
     def _process_criteria(self, criteria):
         """
@@ -384,25 +485,25 @@ class Experiment:
         Handles different ways of specifying criteria (objects, names, IDs) and ensures
         they exist on the server.
 
-    
-    Args:
+        Args:
             criteria (list or str): The criteria to process.
 
-    
-    Returns:
-            list: List of criteria IDs.
+        Returns:
+            list: List of processed Criteria objects.
 
-    
-    Raises:
+        Raises:
             ValueError: If the criteria are invalid.
             Exception: If criteria cannot be found on the server.
         """
-        criteria_ids = []
+        processed_criteria = []
+        criteria_ids = []  # We still need IDs for the API payload
+        
         if isinstance(criteria, list):
             for crit in criteria:
                 if isinstance(crit, Criteria):
                     if getattr(crit, "id", None):
                         criteria_ids.append(crit.id)
+                        processed_criteria.append(crit)
                     else:
                         # Check that required fields are nonempty
                         if (crit.name and crit.name.strip() and
@@ -411,13 +512,14 @@ class Experiment:
                             crit.criteria_type and crit.criteria_type.strip()):
                             crit.save()
                             criteria_ids.append(crit.id)
+                            processed_criteria.append(crit)
                         else:
                             # Otherwise, try to download by name as a reference.
                             try:
                                 downloaded = Criteria.download(name=crit.name)
                                 if downloaded and getattr(downloaded, "id", None):
-                                    crit.id = downloaded.id
-                                    criteria_ids.append(crit.id)
+                                    criteria_ids.append(downloaded.id)
+                                    processed_criteria.append(downloaded)
                                 else:
                                     raise Exception(f"Criteria with name '{crit.name}' not found on server.")
                             except Exception as e:
@@ -429,42 +531,104 @@ class Experiment:
                         downloaded = Criteria.download(name=crit)
                         if downloaded and getattr(downloaded, "id", None):
                             criteria_ids.append(downloaded.id)
+                            processed_criteria.append(downloaded)
                         else:
                             raise Exception(f"Criteria with name '{crit}' not found on server.")
                     except Exception as e:
                         raise Exception(f"Criteria lookup failed for '{crit}': {str(e)}")
                 else:
-                    raise ValueError("Each Criteria must be a Criteriaobject or a string.")
-            return criteria_ids
+                    raise ValueError("Each Criteria must be a Criteria object or a string.")
+            
+            # Store the criteria IDs for the API payload
+            self._criteria_ids = criteria_ids
+            return processed_criteria
+            
         elif isinstance(criteria, str):
             downloaded = Criteria.download(name=criteria)
             if downloaded and getattr(downloaded, "id", None):
-                return [downloaded.id]
+                self._criteria_ids = [downloaded.id]
+                return [downloaded]
             else:
                 raise Exception(f"Criteria not found on server with name: {criteria}")
         else:
             raise ValueError("Criteria must be provided as a list of Criteria objects or a string.")
 
+    def _process_function(self):
+        """
+        Process and execute the function parameter from the task.
+        
+        If a callable is provided, run it on each row of the already downloaded dataset,
+        and return a dict of {cohort_name: function_output_list}.        
+        If a string is provided with module path, attempt to import it first, then run it if successful.
+        
+        Returns:
+            dict: {cohort_name: function_output_list}
+            
+        Raises:
+            Exception: If dataset is not available or function execution fails
+        """
+        # if (self._downloaded_task is None or 
+        #     not hasattr(self._downloaded_task, 'function') or 
+        #     self._downloaded_task.function is None):
+        #     return None, None
+
+        cross_cohort_outputs = {}
+        for cohort in self.cohorts:
+            if not cohort.function:
+                continue
+            
+            if callable(cohort.function):
+                function = cohort.function
+            elif isinstance(cohort.function, str):
+                function = import_function(cohort.function)
+            else:
+                raise ValueError(f"Expected function to be callable or a string, got {function} of type {type(function)}.")            
+
+            cohort_outputs = []
+            # Execute the function on each example
+            for example in self._downloaded_dataset.examples:
+                cohort_outputs.append(function(example, cohort))
+                
+            cross_cohort_outputs[cohort.name] = cohort_outputs
+
+        return cross_cohort_outputs
+
+
     def _build_payload(self):
         """
         Build the payload for the API request.
         
-        Processes all components of the experiment and constructs the complete
+        Uses the processed components of the experiment to construct the complete
         payload to send to the server.
 
-    
-    Returns:
+        Returns:
             dict: The payload to send to the server.
         """
+        # Make sure all components are processed
+        if not hasattr(self, '_downloaded_dataset') or self._downloaded_dataset is None:
+            self.dataset = self._process_dataset(self.dataset)
+            
+        if not hasattr(self, '_downloaded_task') or self._downloaded_task is None:
+            self.task = self._process_task(self.task)
+            
+        if not hasattr(self, '_criteria_ids'):
+            self.criteria = self._process_criteria(self.criteria)
+            
+        # Make sure cohorts are processed
+        if not hasattr(self, 'cohorts') or self.cohorts is None:
+            self.cohorts = self._process_cohorts(self.cohorts)
+                        
         payload = {
             "experiment_name": self.name,
-            "dataset": self._process_dataset(self.dataset),
-            "task": self._process_task(self.task),
+            "dataset": self._downloaded_dataset.id,
+            "task": self._downloaded_task.id,
             "exp_type": "advanced",  
-            "criteria": self._process_criteria(self.criteria),
+            "criteria": self._criteria_ids,
             "judge_model": self.judge_model,
-            "cohorts": self._process_cohorts(),
+            "cohorts": [cohort.to_dict() for cohort in self.cohorts],
+            "function_output": self._process_function()
         }
+            
         return payload
 
     def _call_api(self, payload):
@@ -602,3 +766,43 @@ class Experiment:
                     time.sleep(poll_interval * 2)
                 
                 time.sleep(poll_interval)
+
+    def __str__(self):
+        """
+        Return a string representation of the experiment for easier debugging.
+        """
+        return f"Experiment(name='{self.name}', cohorts={self.cohorts})"
+
+    def _cohorts_default(self):
+        """
+        Create default cohorts based on the task configuration.
+        
+        Returns:
+            list: List of default Cohort objects based on the task's function or generator_model.
+            
+        Raises:
+            ValueError: If the task doesn't have a function or generator_model.
+        """
+        # Make sure task is processed
+        if self._downloaded_task is None:
+            self._downloaded_task = self._process_task(self.task)
+            
+        # Create cohort based on task properties
+        if self._downloaded_task.function:
+            # Task has a function - create cohort with function name
+            if callable(self._downloaded_task.function):
+                name = self._downloaded_task.function.__name__
+            else:
+                # Function is a string
+                name = self._downloaded_task.function
+                
+            cohort = Cohort(name=name, function=self._downloaded_task.function)
+                
+        elif self._downloaded_task.generator_model:
+            name = self._downloaded_task.generator_model            
+            cohort = Cohort(name=name, generator_model=name)
+
+        else:
+            raise ValueError("Cannot create default cohort: task has neither generator_model nor function.")
+        
+        return [cohort]

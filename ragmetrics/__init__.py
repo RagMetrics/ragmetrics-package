@@ -13,6 +13,7 @@ Main Components
 * **login**: Authenticate with the RagMetrics API
 * **monitor**: Wrap LLM clients to automatically log interactions
 * **trace_function_call**: Decorator to trace function execution for tracking retrieval in RAG pipelines
+* **import_function**: Utility to import functions from string paths for execution
 
 Core API Functions:
 * **Cohort**: Run controlled experiments to group and compare different LLM or RAG implementations
@@ -32,3 +33,4 @@ from ragmetrics.experiments import Experiment, Cohort
 from ragmetrics.criteria import Criteria
 from ragmetrics.reviews import ReviewQueue
 from ragmetrics.trace import Trace
+from ragmetrics.utils import import_function
