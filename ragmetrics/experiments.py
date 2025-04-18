@@ -3,11 +3,11 @@ import requests
 import time
 import json
 from tqdm import tqdm
-from .api import ragmetrics_client  
-from .tasks import Task 
-from .dataset import Dataset 
-from .criteria import Criteria
-from .utils import import_function
+from ragmetrics.api import ragmetrics_client  
+from ragmetrics.tasks import Task
+from ragmetrics.dataset import Dataset 
+from ragmetrics.criteria import Criteria
+from ragmetrics.utils import import_function
 
 # --- Cohort Object ---
 class Cohort:
@@ -567,11 +567,6 @@ class Experiment:
         Raises:
             Exception: If dataset is not available or function execution fails
         """
-        # if (self._downloaded_task is None or 
-        #     not hasattr(self._downloaded_task, 'function') or 
-        #     self._downloaded_task.function is None):
-        #     return None, None
-
         cross_cohort_outputs = {}
         for cohort in self.cohorts:
             if not cohort.function:

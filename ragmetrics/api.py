@@ -237,7 +237,8 @@ def trace_function_call(func):
         function_input = [
             {
                 "role": "user",
-                "content": formatted_call
+                "content": formatted_call,
+                "tool_call": True
             }
         ]
 
@@ -256,8 +257,7 @@ def trace_function_call(func):
             callback_result={
                 "input": formatted_call,
                 "output": result
-            },
-            trace_type="retrieval"
+            }
         )
         return result
 
@@ -289,15 +289,18 @@ class RagMetricsClient:
         self.metadata = None
         self.conversation_id = str(uuid.uuid4())
     
-    def new_conversation(self):
+    def new_conversation(self, id: Optional[str] = None):
         """
-        Reset the conversation ID to a new UUID.
+        Reset the conversation ID to a new UUID or use the provided ID.
         
         Call this method to start a new conversation thread. All subsequent
         interactions will be logged under the new conversation ID until this
         method is called again.
+        
+        Args:
+            id: Optional custom conversation ID. If not provided, a new UUID will be generated.
         """
-        self.conversation_id = str(uuid.uuid4())
+        self.conversation_id = id if id is not None else str(uuid.uuid4())
 
     def _find_external_caller(self) -> str:
         """
@@ -329,7 +332,6 @@ class RagMetricsClient:
             duration, 
             tools, 
             callback_result=None,
-            trace_type="generation",
             **kwargs
         ):
         """
@@ -342,13 +344,12 @@ class RagMetricsClient:
     
     Args:
             input_messages: The input messages sent to the LLM (prompts, queries, etc.).
-            response: The response received from the LLM.
+            response: The response received from the LLM. Follows OpenAI message list standard.
             metadata_llm: Additional metadata about the LLM and the interaction.
             contexts: Context information or retrieved documents used in the interaction.
             duration: The duration of the interaction in seconds.
             tools: Any tools or functions used during the interaction.
             callback_result: Optional processed results from a custom callback function.
-            trace_type: The type of trace - "generation", "retrieval", or "tools" (default: "generation").
             **kwargs: Additional keyword arguments to include in the trace.
 
     
@@ -366,7 +367,7 @@ class RagMetricsClient:
             raise ValueError("Missing access token. Please log in.")
         
         if isinstance(input_messages, list) and len(input_messages) == 1 \
-            and trace_type != "retrieval":
+            and not input_messages[0].get("tool_call", False) is True:
             self.new_conversation()
 
         # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
@@ -402,8 +403,7 @@ class RagMetricsClient:
             "output": None,
             "expected": None,            
             "scores": None,
-            "conversation_id": self.conversation_id,
-            "trace_type": trace_type
+            "conversation_id": self.conversation_id
         }
 
         # Process callback_result if provided

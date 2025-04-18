@@ -1,10 +1,9 @@
-import sys
 import os
 import time
 from dotenv import load_dotenv
 
 import ragmetrics
-from ragmetrics import Task, Example, Dataset, Experiment, Cohort, Criteria
+from ragmetrics import Task, Example, Dataset, Experiment, Criteria
 
 # Load environment variables
 load_dotenv(".env")
@@ -16,7 +15,7 @@ base_url = os.environ.get('RAGMETRICS_BASE_URL')
 # Login to ragmetrics
 ragmetrics.login(key=api_key, base_url=base_url)
 
-def test_function(example, cohort):
+def local_llm_pipeline(example, cohort):
     question = example.question
     answer = f"Answer to the question: {question}"
     contexts = [
@@ -49,7 +48,7 @@ def test_function(example, cohort):
 
 dataset_name = f"QA_Capitals_{int(time.time())}"
 task_name = f"QA_Capitals_{int(time.time())}"
-experiment_name = "QA_Local_function"
+experiment_name = f"QA_Local_function_{int(time.time())}"
 
 e1 = Example(
     question="What is the capital of New York State?", 
@@ -67,17 +66,18 @@ e2 = Example(
     ])
 dataset1 = Dataset(examples = [e1, e2], name=dataset_name)
 
-task1 = Task(name=task_name, function=test_function)
+task1 = Task(name=task_name, function=local_llm_pipeline)
 
 criteria1 = Criteria(name = "Accuracy")
 
-exp_models = Experiment(
+exp1 = Experiment(
             name=experiment_name,
             dataset=dataset1,
             task=task1,
             criteria=[criteria1],                
             judge_model="gpt-4o-mini"
         )
+final_progress_data = exp1.run()
 
-final_progress_data = exp_models.run()
-print(f"Experiment completed with data: {final_progress_data}")
+assert final_progress_data.get("state") == "SUCCESS", \
+    f"Expected state 'SUCCESS', got: {final_progress_data.get('state')}"
