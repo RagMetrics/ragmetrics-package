@@ -10,47 +10,110 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+def _extract_content(data, data_type="input"):
+    """
+    Process LLM input or output data into a standardized format.
+    
+    Handles various data formats for both input and output processing, converting them
+    into a consistent representation based on the data_type parameter.
+    
+    Args:
+        data: The data to process. Could be input messages or LLM response.
+        data_type: Whether this is "input" or "output" data (default: "input").
+    
+    Returns:
+        str: Formatted string representation of the data, or None if data is empty.
+    """
+    if not data:
+        return None
+        
+    # Output-specific processing
+    if data_type == "output":
+        # Handle tool_calls in the response (OpenAI function calling API)
+        if isinstance(data, dict) and "choices" in data:
+            try:
+                message = data["choices"][0]["message"]
+                if message.get("tool_calls") and not message.get("content"):
+                    tool_call = message["tool_calls"][0]
+                    if tool_call["type"] == "function":
+                        func_name = tool_call["function"]["name"]
+                        # Parse the JSON arguments
+                        args_dict = json.loads(tool_call["function"]["arguments"])
+                        # Format args as key=value pairs with proper quoting for strings
+                        args_str = ", ".join(
+                            f"{k}={repr(v) if isinstance(v, str) else v}" 
+                            for k, v in args_dict.items()
+                        )
+                        return f"={func_name}({args_str})"
+            except Exception as e:
+                logger.error("Error formatting tool_calls from response: %s", e)
+                
+        # Also handle object-style responses (OpenAI client library)
+        if hasattr(data, "choices") and data.choices:
+            try:
+                message = data.choices[0].message
+                if hasattr(message, "tool_calls") and message.tool_calls and (not message.content or message.content is None):
+                    tool_call = message.tool_calls[0]
+                    if tool_call.type == "function":
+                        func_name = tool_call.function.name
+                        # Parse the JSON arguments
+                        args_dict = json.loads(tool_call.function.arguments)
+                        # Format args as key=value pairs with proper quoting for strings
+                        args_str = ", ".join(
+                            f"{k}={repr(v) if isinstance(v, str) else v}" 
+                            for k, v in args_dict.items()
+                        )
+                        return f"={func_name}({args_str})"
+                return message.content
+            except Exception as e:
+                logger.error("Error extracting content from response.choices: %s", e)
+        
+        # Handle other response types
+        if hasattr(data, "text"):
+            return data.text
+        if hasattr(data, "content"):
+            return data.content
+        return data
+    
+    # Input processing
+    if isinstance(data, list) and len(data) > 0:
+        last_message = data[-1]
+        role = "unknown"
+        content = str(last_message)
+        
+        if isinstance(last_message, dict):
+            role = last_message.get('role', role)
+            content = last_message.get('content', content)
+        elif hasattr(last_message, 'role'):
+            role = last_message.role
+            content = getattr(last_message, 'content', content)
+            
+        input_str = f"{role}: {content}"
+        return input_str
+    
+    if isinstance(data, dict) and "role" in data:
+        return f"{data.get('role', 'unknown')}: {data.get('content', '')}"
+    if hasattr(data, "role") and hasattr(data, "content"):
+        return f"{data.role}: {data.content}"
+    return str(data)
+
+# Keep these functions for backward compatibility
 def default_input(raw_input):
     """
     Format input messages into a standardized string format.
     
     Handles various input formats (list of messages, single message object, etc.)
     and converts them into a consistent string representation.
-
-
+    
     Args:
         raw_input: The input to format. Can be a list of messages, a dictionary
                   with role/content keys, an object with role/content attributes,
                   or a primitive value.
-
-
+    
     Returns:
         str: Formatted string representation of the input, or None if input is empty.
-
     """
-    if not raw_input:
-        return None
-    if isinstance(raw_input, list):
-        def format_message(m):
-            if isinstance(m, dict):
-                role = m.get("role", "unknown")
-                content = m.get("content", "")
-            elif hasattr(m, "role") and hasattr(m, "content"):
-                role = getattr(m, "role", "unknown")
-                content = getattr(m, "content", "")
-            else:
-                role = "unknown"
-                content = str(m)
-            return f"{role}: {content}"
-        return "\n".join(format_message(m) for m in raw_input)
-    elif isinstance(raw_input, dict):
-        role = raw_input.get("role", "unknown")
-        content = raw_input.get("content", "")
-        return f"{role}: {content}"
-    elif hasattr(raw_input, "role") and hasattr(raw_input, "content"):
-        return f"{raw_input.role}: {raw_input.content}"
-    else:
-        return str(raw_input)
+    return _extract_content(raw_input, "input")
 
 def default_output(raw_response):
     """
@@ -58,34 +121,16 @@ def default_output(raw_response):
     
     Handles different response formats from various LLM providers and APIs,
     extracting the actual content in a consistent way.
-
-
+    
     Args:
         raw_response: The response object from the LLM. Can be OpenAI ChatCompletion,
                      object with text/content attributes, or another response format.
-
-
+    
     Returns:
         str: The extracted content from the response, or the raw response if content
              cannot be extracted.
     """
-    if not raw_response:
-        return None
-    # OpenAI chat completion
-    if hasattr(raw_response, "choices") and raw_response.choices:
-        try:
-            # OpenAI ChatCompletion objects expose choices as objects with a message attribute.
-            return raw_response.choices[0].message.content
-        except Exception as e:
-            logger.error("Error extracting content from response.choices: %s", e)
-    # If response has a text attribute, return it (for non-chat completions)
-    if hasattr(raw_response, "text"):
-        return raw_response.text
-    # Fallback to checking for a content attribute (if it's a simple object)
-    if hasattr(raw_response, "content"):
-        return raw_response.content
-    # Unable to determine response content, log and return the raw response.
-    return raw_response
+    return _extract_content(raw_response, "output")
 
 def default_callback(raw_input, raw_output) -> dict:
     """
@@ -104,8 +149,8 @@ def default_callback(raw_input, raw_output) -> dict:
         dict: A dictionary containing formatted input and output.
     """
     return {
-        "input": default_input(raw_input),
-        "output": default_output(raw_output)
+        "input": _extract_content(raw_input, "input"),
+        "output": _extract_content(raw_output, "output")
     }
 
 def trace_function_call(func):
@@ -165,11 +210,35 @@ def trace_function_call(func):
         result = func(*args, **kwargs)
         duration = time.time() - start_time
 
+        # Format parameters in the requested format
+        params = []
+        # Add positional arguments
+        for i, arg in enumerate(args):
+            # Try to get the parameter name from the function signature
+            try:
+                import inspect
+                sig = inspect.signature(func)
+                param_names = list(sig.parameters.keys())
+                if i < len(param_names):
+                    params.append(f"{param_names[i]}={repr(arg)}")
+                else:
+                    params.append(f"{repr(arg)}")
+            except:
+                params.append(f"{repr(arg)}")
+        
+        # Add keyword arguments
+        for k, v in kwargs.items():
+            params.append(f"{k}={repr(v)}")
+        
+        # Create the formatted function call string
+        formatted_call = f"={func.__name__}({', '.join(params)})"
+
         # Prepare structured input format
         function_input = [
             {
                 "role": "user",
-                "content": f"{func.__name__} called with args: {json.dumps(args)}, kwargs: {json.dumps(kwargs)}"
+                "content": formatted_call,
+                "tool_call": True
             }
         ]
 
@@ -186,10 +255,9 @@ def trace_function_call(func):
             duration=duration,
             tools=None,  
             callback_result={
-                "input": function_input, 
-                "output": default_output(function_output)
-            },
-            trace_type="retrieval"
+                "input": formatted_call,
+                "output": result
+            }
         )
         return result
 
@@ -221,15 +289,18 @@ class RagMetricsClient:
         self.metadata = None
         self.conversation_id = str(uuid.uuid4())
     
-    def new_conversation(self):
+    def new_conversation(self, id: Optional[str] = None):
         """
-        Reset the conversation ID to a new UUID.
+        Reset the conversation ID to a new UUID or use the provided ID.
         
         Call this method to start a new conversation thread. All subsequent
         interactions will be logged under the new conversation ID until this
         method is called again.
+        
+        Args:
+            id: Optional custom conversation ID. If not provided, a new UUID will be generated.
         """
-        self.conversation_id = str(uuid.uuid4())
+        self.conversation_id = id if id is not None else str(uuid.uuid4())
 
     def _find_external_caller(self) -> str:
         """
@@ -252,7 +323,17 @@ class RagMetricsClient:
             frame = frame.f_back
         return external_caller
 
-    def _log_trace(self, input_messages, response, metadata_llm, contexts, duration, tools, callback_result=None, trace_type="generation", **kwargs):
+    def _log_trace(
+            self, 
+            input_messages, 
+            response, 
+            metadata_llm, 
+            contexts, 
+            duration, 
+            tools, 
+            callback_result=None,
+            **kwargs
+        ):
         """
         Log a trace of an LLM interaction to the RagMetrics API.
         
@@ -263,13 +344,12 @@ class RagMetricsClient:
     
     Args:
             input_messages: The input messages sent to the LLM (prompts, queries, etc.).
-            response: The response received from the LLM.
+            response: The response received from the LLM. Follows OpenAI message list standard.
             metadata_llm: Additional metadata about the LLM and the interaction.
             contexts: Context information or retrieved documents used in the interaction.
             duration: The duration of the interaction in seconds.
             tools: Any tools or functions used during the interaction.
             callback_result: Optional processed results from a custom callback function.
-            trace_type: The type of trace - "generation", "retrieval", or "tools" (default: "generation").
             **kwargs: Additional keyword arguments to include in the trace.
 
     
@@ -286,9 +366,9 @@ class RagMetricsClient:
         if not self.access_token:
             raise ValueError("Missing access token. Please log in.")
         
-        if trace_type!= "retrieval":
-            if isinstance(input_messages, list) and len(input_messages) == 1:
-                self.new_conversation()
+        if isinstance(input_messages, list) and len(input_messages) == 1 \
+            and not input_messages[0].get("tool_call", False) is True:
+            self.new_conversation()
 
         # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
         if hasattr(response, "model_dump"):
@@ -306,7 +386,7 @@ class RagMetricsClient:
             union_metadata.update(self.metadata)
         if isinstance(metadata_llm, dict):
             union_metadata.update(metadata_llm)
-        
+
         # Construct the payload with placeholders for callback result
         payload = {
             "raw": {
@@ -323,8 +403,7 @@ class RagMetricsClient:
             "output": None,
             "expected": None,            
             "scores": None,
-            "conversation_id": self.conversation_id,
-            "trace_type":"generation"
+            "conversation_id": self.conversation_id
         }
 
         # Process callback_result if provided
@@ -332,17 +411,6 @@ class RagMetricsClient:
             if key in callback_result:
                 payload[key] = callback_result[key]
 
-        if (("output" not in payload or payload["output"] is None) and tools is not None):
-            try:
-                trace_type = "tools"
-                if hasattr(response, "choices") and response.choices:
-                    payload["output"] = response.choices[0].message.tool_calls
-                elif isinstance(response, dict) and "choices" in response:
-                    payload["output"] = response["choices"][0]["message"]["tool_calls"]
-            except Exception as e:
-                logger.error("Error extracting tool_calls from response: %s", e)
-        
-        payload["trace_type"] = trace_type
         # Serialize
         payload_str = json.dumps(
             payload, 
@@ -355,7 +423,6 @@ class RagMetricsClient:
         )
         payload = json.loads(payload_str)
 
-        # Use data=payload_str (which is a string) and specify the content-type header.
         log_resp = self._make_request(
             method='post',
             endpoint='/api/client/logtrace/',
@@ -402,6 +469,8 @@ class RagMetricsClient:
 
         if base_url:
             self.base_url = base_url
+        elif 'RAGMETRICS_BASE_URL' in os.environ:
+            self.base_url = os.environ['RAGMETRICS_BASE_URL']
 
         response = self._make_request(
             method='post',

@@ -1,7 +1,7 @@
-from .api import RagMetricsObject
-from .dataset import Dataset 
-from .criteria import Criteria
-from .trace import Trace
+from ragmetrics.api import RagMetricsObject
+from ragmetrics.dataset import Dataset
+from ragmetrics.criteria import Criteria
+from ragmetrics.trace import Trace
 
 class ReviewQueue(RagMetricsObject):
     """
