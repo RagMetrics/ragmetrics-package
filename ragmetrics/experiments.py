@@ -462,7 +462,7 @@ class Experiment:
                 else:
                     raise ValueError("Each cohort must be a Cohort object or a dict.")
         else:
-            raise ValueError("cohorts must be provided as a JSON string or a list.")
+            raise ValueError("Cohorts must be provided as a JSON string or a list.")
         
         # Validate that cohorts have the required fields
         for cohort in cohorts_list:
@@ -573,16 +573,18 @@ class Experiment:
                 continue
             
             if callable(cohort.function):
-                function = cohort.function
+                local_function = cohort.function
             elif isinstance(cohort.function, str):
-                function = import_function(cohort.function)
+                local_function = import_function(cohort.function)
             else:
-                raise ValueError(f"Expected function to be callable or a string, got {function} of type {type(function)}.")            
+                raise ValueError(f"Expected function to be callable or a string, got {local_function} of type {type(local_function)}.")            
 
-            cohort_outputs = []
-            # Execute the function on each example
+            # Execute the local function on each example
+            cohort_outputs = []            
             for example in self._downloaded_dataset.examples:
-                cohort_outputs.append(function(example, cohort))
+                input = example.question
+                output = local_function(input, cohort)
+                cohort_outputs.append(output)
                 
             cross_cohort_outputs[cohort.name] = cohort_outputs
 
@@ -787,9 +789,11 @@ class Experiment:
             # Task has a function - create cohort with function name
             if callable(self._downloaded_task.function):
                 name = self._downloaded_task.function.__name__
-            else:
+            elif isinstance(self._downloaded_task.function, str):
                 # Function is a string
                 name = self._downloaded_task.function
+            else:
+                raise ValueError(f"Expected function to be callable or a string, got {self._downloaded_task.function} of type {type(self._downloaded_task.function)}.")
                 
             cohort = Cohort(name=name, function=self._downloaded_task.function)
                 

@@ -11,7 +11,7 @@ class Example:
     performs on specific questions.
     """
 
-    def __init__(self, question, ground_truth_context, ground_truth_answer):
+    def __init__(self, question, ground_truth_context=None, ground_truth_answer=None):
         """
         Initialize a new Example instance.
         
@@ -36,12 +36,17 @@ class Example:
                     ],
                     ground_truth_answer="Yes"
                 )
+                
+                # Example with only question
+                example_question_only = Example(
+                    question="What is the population of London?"
+                )
 
     
     Args:
             question (str): The question to be answered.
-            ground_truth_context (str or list): The context containing the answer. Can be a string or list of strings.
-            ground_truth_answer (str): The expected answer to the question.
+            ground_truth_context (str or list, optional): The context containing the answer. Can be a string or list of strings.
+            ground_truth_answer (str, optional): The expected answer to the question.
         """
         self.question = question
         self.ground_truth_context = ground_truth_context
@@ -55,11 +60,15 @@ class Example:
     Returns:
             dict: Dictionary containing the example's question, context, and answer.
         """
-        return {
-            "question": self.question,
-            "ground_truth_context": self.ground_truth_context,
-            "ground_truth_answer": self.ground_truth_answer
-        }
+        result = {"question": self.question}
+        
+        if self.ground_truth_context is not None:
+            result["ground_truth_context"] = self.ground_truth_context
+            
+        if self.ground_truth_answer is not None:
+            result["ground_truth_answer"] = self.ground_truth_answer
+            
+        return result
 
 class Dataset(RagMetricsObject):
     """
