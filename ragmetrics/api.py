@@ -471,6 +471,8 @@ class RagMetricsClient:
             self.base_url = base_url
         elif 'RAGMETRICS_BASE_URL' in os.environ:
             self.base_url = os.environ['RAGMETRICS_BASE_URL']
+        else:
+            self.base_url = 'https://ragmetrics.ai'
 
         response = self._make_request(
             method='post',
