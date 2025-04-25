@@ -471,6 +471,8 @@ class RagMetricsClient:
             self.base_url = base_url
         elif 'RAGMETRICS_BASE_URL' in os.environ:
             self.base_url = os.environ['RAGMETRICS_BASE_URL']
+        else:
+            self.base_url = 'https://ragmetrics.ai'
 
         response = self._make_request(
             method='post',
@@ -583,7 +585,7 @@ class RagMetricsClient:
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                tools= kwargs.pop('tools', None)
+                tools = kwargs.pop('tools', None)
                 self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
