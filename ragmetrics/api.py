@@ -10,93 +10,6 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-def _extract_content(data, data_type="input"):
-    """
-    Process LLM input or output data into a standardized format.
-    
-    Handles various data formats for both input and output processing, converting them
-    into a consistent representation based on the data_type parameter.
-    
-    Args:
-        data: The data to process. Could be input messages or LLM response.
-        data_type: Whether this is "input" or "output" data (default: "input").
-    
-    Returns:
-        str: Formatted string representation of the data, or None if data is empty.
-    """
-    if not data:
-        return None
-        
-    # Output-specific processing
-    if data_type == "output":
-        # Handle tool_calls in the response (OpenAI function calling API)
-        if isinstance(data, dict) and "choices" in data:
-            try:
-                message = data["choices"][0]["message"]
-                if message.get("tool_calls") and not message.get("content"):
-                    tool_call = message["tool_calls"][0]
-                    if tool_call["type"] == "function":
-                        func_name = tool_call["function"]["name"]
-                        # Parse the JSON arguments
-                        args_dict = json.loads(tool_call["function"]["arguments"])
-                        # Format args as key=value pairs with proper quoting for strings
-                        args_str = ", ".join(
-                            f"{k}={repr(v) if isinstance(v, str) else v}" 
-                            for k, v in args_dict.items()
-                        )
-                        return f"={func_name}({args_str})"
-            except Exception as e:
-                logger.error("Error formatting tool_calls from response: %s", e)
-                
-        # Also handle object-style responses (OpenAI client library)
-        if hasattr(data, "choices") and data.choices:
-            try:
-                message = data.choices[0].message
-                if hasattr(message, "tool_calls") and message.tool_calls and (not message.content or message.content is None):
-                    tool_call = message.tool_calls[0]
-                    if tool_call.type == "function":
-                        func_name = tool_call.function.name
-                        # Parse the JSON arguments
-                        args_dict = json.loads(tool_call.function.arguments)
-                        # Format args as key=value pairs with proper quoting for strings
-                        args_str = ", ".join(
-                            f"{k}={repr(v) if isinstance(v, str) else v}" 
-                            for k, v in args_dict.items()
-                        )
-                        return f"={func_name}({args_str})"
-                return message.content
-            except Exception as e:
-                logger.error("Error extracting content from response.choices: %s", e)
-        
-        # Handle other response types
-        if hasattr(data, "text"):
-            return data.text
-        if hasattr(data, "content"):
-            return data.content
-        return data
-    
-    # Input processing
-    if isinstance(data, list) and len(data) > 0:
-        last_message = data[-1]
-        role = "unknown"
-        content = str(last_message)
-        
-        if isinstance(last_message, dict):
-            role = last_message.get('role', role)
-            content = last_message.get('content', content)
-        elif hasattr(last_message, 'role'):
-            role = last_message.role
-            content = getattr(last_message, 'content', content)
-            
-        input_str = f"{role}: {content}"
-        return input_str
-    
-    if isinstance(data, dict) and "role" in data:
-        return f"{data.get('role', 'unknown')}: {data.get('content', '')}"
-    if hasattr(data, "role") and hasattr(data, "content"):
-        return f"{data.role}: {data.content}"
-    return str(data)
-
 # Keep these functions for backward compatibility
 def default_input(raw_input):
     """
@@ -113,7 +26,17 @@ def default_input(raw_input):
     Returns:
         str: Formatted string representation of the input, or None if input is empty.
     """
-    return _extract_content(raw_input, "input")
+    # Input processing
+    if isinstance(raw_input, list) and len(raw_input) > 0:
+        raw_input = raw_input[-1]
+    
+    if isinstance(raw_input, dict) and "content" in raw_input:
+        content = raw_input.get('content', '')
+    elif hasattr(raw_input, "content"):
+        content = raw_input.content
+    else:
+        content = str(raw_input)
+    return content
 
 def default_output(raw_response):
     """
@@ -130,7 +53,56 @@ def default_output(raw_response):
         str: The extracted content from the response, or the raw response if content
              cannot be extracted.
     """
-    return _extract_content(raw_response, "output")
+    if not raw_response:
+        return None
+        
+    # Handle tool_calls in the response (OpenAI function calling API)
+    if isinstance(raw_response, dict) and "choices" in raw_response:
+        try:
+            message = raw_response["choices"][0]["message"]
+            if message.get("tool_calls") and not message.get("content"):
+                tool_call = message["tool_calls"][0]
+                if tool_call["type"] == "function":
+                    func_name = tool_call["function"]["name"]
+                    # Parse the JSON arguments
+                    args_dict = json.loads(tool_call["function"]["arguments"])
+                    # Format args as key=value pairs with proper quoting for strings
+                    args_str = ", ".join(
+                        f"{k}={repr(v) if isinstance(v, str) else v}" 
+                        for k, v in args_dict.items()
+                    )
+                    return f"={func_name}({args_str})"
+        except Exception as e:
+            logger.error("Error formatting tool_calls from response: %s", e)
+            
+    # Also handle object-style responses (OpenAI client library)
+    if hasattr(raw_response, "choices") and raw_response.choices:
+        try:
+            message = raw_response.choices[0].message
+            if hasattr(message, "tool_calls") and message.tool_calls and (not message.content or message.content is None):
+                tool_call = message.tool_calls[0]
+                if tool_call.type == "function":
+                    func_name = tool_call.function.name
+                    # Parse the JSON arguments
+                    args_dict = json.loads(tool_call.function.arguments)
+                    # Format args as key=value pairs with proper quoting for strings
+                    args_str = ", ".join(
+                        f"{k}={repr(v) if isinstance(v, str) else v}" 
+                        for k, v in args_dict.items()
+                    )
+                    return f"={func_name}({args_str})"
+            return message.content
+        except Exception as e:
+            logger.error("Error extracting content from response.choices: %s", e)
+    
+    # Handle other response types
+    if hasattr(raw_response, "text"):
+        content = raw_response.text
+    if hasattr(raw_response, "content"):
+        content = raw_response.content
+    else:
+        content = str(raw_response)
+    return content
 
 def default_callback(raw_input, raw_output) -> dict:
     """
@@ -149,8 +121,8 @@ def default_callback(raw_input, raw_output) -> dict:
         dict: A dictionary containing formatted input and output.
     """
     return {
-        "input": _extract_content(raw_input, "input"),
-        "output": _extract_content(raw_output, "output")
+        "input": default_input(raw_input),
+        "output": default_output(raw_output)
     }
 
 def trace_function_call(func):
