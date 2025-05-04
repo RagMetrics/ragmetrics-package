@@ -12,19 +12,31 @@ from ragmetrics.utils import import_function
 # --- Cohort Object ---
 class Cohort:
     """
-    A class representing a group of models or pipelines to be evaluated.
-    
-    A cohort defines a specific configuration to test in an experiment. It can 
-    represent either a single model or a RAG pipeline configuration. Cohorts 
+    Represents a cohort for an experiment.
+
+    A cohort defines a specific configuration to test in an experiment. It can
+    represent either a single model or a RAG pipeline configuration. Cohorts
     allow comparing different setups against the same dataset and criteria.
     """
 
-    def __init__(self, name, generator_model=None, rag_pipeline=None, system_prompt=None, function=None):
+    def __init__(
+            self, 
+            name, 
+            generator_model=None, 
+            rag_pipeline=None, 
+            system_prompt=None, 
+            function=None, 
+            **kwargs
+        ):
         """
-        Initialize a new Cohort instance.
-        
+        Initialize a Cohort instance.
+
+        A cohort defines a specific configuration to test in an experiment. It can
+        represent either a single model or a RAG pipeline configuration. Cohorts
+        allow comparing different setups against the same dataset and criteria.
+
         Note: A cohort must include exactly one of: generator_model, rag_pipeline, or function_name.
-        
+
         Example - Creating model cohorts:
         
             .. code-block:: python
@@ -67,34 +79,41 @@ class Cohort:
             
                 # For using a local function with string reference:
                 cohorts = [
-                    Cohort(name="My Function", function_name="my_module.my_function")
+                    Cohort(name="My Function", function="my_module.my_function")
                 ]
                 
                 # For using a local function with callable:
-                def my_processor(example):
+                def my_processor(input, cohort):
+                    # Process input based on cohort config
                     return {"generated_answer": "Some response"}
                     
                 cohorts = [
-                    Cohort(name="My Processor", function_name=my_processor)
+                    Cohort(name="My Processor", function=my_processor)
                 ]
 
-    
-    Args:
-            name (str): The name of the cohort (e.g., "GPT-4", "RAG-v1").
-            generator_model (str, optional): The model identifier to use for generation.
-            rag_pipeline (str, optional): The RAG pipeline configuration identifier.
-            system_prompt (str, optional): Override system prompt to use with this cohort.
+        Args:
+            name (str): Name of the cohort.
+            generator_model (str, optional): Name/ID of the LLM model to use for generation.
+            rag_pipeline (str, optional): Name/ID of the RAG pipeline to use.
+            system_prompt (str, optional): System prompt to use with the generator model.
             function (callable or str, optional): Function to use for local execution instead of an API call.
                 Can be a callable function or a string in the format "module.submodule.function_name".
-                The function should take an Example object and return a dictionary with generated outputs.
-                If None is provided, no function will be used.
+                The function should take an input (e.g., question from dataset) and the cohort object,
+                and return a dictionary with generated outputs.
+            **kwargs: Additional keyword arguments to set as cohort attributes.
         """
         self.name = name
+        # Set built-in arguments first
+        self.function = import_function(function) if function else None
         self.generator_model = generator_model
-        self.rag_pipeline = rag_pipeline
+        self.rag_pipeline = rag_pipeline 
         self.system_prompt = system_prompt
-        self.function = import_function(function)
         
+        # Set additional kwargs
+        for key, value in kwargs.items():
+            if key not in ['generator_model', 'rag_pipeline', 'system_prompt', 'function']:
+                setattr(self, key, value)
+
     def to_dict(self):
         """
         Convert the Cohort instance to a dictionary for API communication.
@@ -464,16 +483,22 @@ class Experiment:
         else:
             raise ValueError("Cohorts must be provided as a JSON string or a list.")
         
-        # Validate that cohorts have the required fields
+        # Validate: Each cohort must have exactly one generator field
         for cohort in cohorts_list:
             cohort_dict = cohort.to_dict()
-            # For API calls, each cohort needs at least one of these fields
-            if not any(key in cohort_dict for key in ["generator_model", "rag_pipeline", "function"]):
-                raise ValueError("Each cohort must include either 'generator_model', 'rag_pipeline', or 'function'.")
-            
-            # For API calls, cohorts should not have multiple main fields
             main_keys = ["generator_model", "rag_pipeline", "function"]
-            if sum(key in cohort_dict for key in main_keys) > 1:
+            generator_count = sum(key in cohort_dict for key in main_keys)
+            if generator_count == 0:
+                #If missing, fill it in from the task
+                if self.task.function:
+                    cohort.function = self.task.function
+                elif self.task.generator_model:
+                    cohort.generator_model = self.task.generator_model
+                elif self.task.rag_pipeline:
+                    cohort.rag_pipeline = self.task.rag_pipeline
+                else:
+                    raise ValueError("Each cohort (or the task) must include either 'generator_model', 'rag_pipeline', or 'function'.")            
+            elif generator_count > 1:
                 raise ValueError("Each cohort should include only one of ['generator_model', 'rag_pipeline', 'function']")
             
         return cohorts_list
