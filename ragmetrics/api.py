@@ -300,7 +300,8 @@ class RagMetricsClient:
             input_messages, 
             response, 
             metadata_llm, 
-            contexts, 
+            contexts,
+            expected,
             duration, 
             tools, 
             callback_result=None,
@@ -316,9 +317,10 @@ class RagMetricsClient:
     
     Args:
             input_messages: The input messages sent to the LLM (prompts, queries, etc.).
-            response: The response received from the LLM. Follows OpenAI message list standard.
+            response: The response received from the LLM. Follows OpenAI message list standard.            
             metadata_llm: Additional metadata about the LLM and the interaction.
             contexts: Context information or retrieved documents used in the interaction.
+            expected: The expected output from the LLM.
             duration: The duration of the interaction in seconds.
             tools: Any tools or functions used during the interaction.
             callback_result: Optional processed results from a custom callback function.
@@ -370,10 +372,10 @@ class RagMetricsClient:
             },
             "metadata": union_metadata,
             "contexts": contexts,
+            "expected": expected,
             "tools": tools,
             "input": None,
             "output": None,
-            "expected": None,            
             "scores": None,
             "conversation_id": self.conversation_id
         }
@@ -553,12 +555,23 @@ class RagMetricsClient:
                 start_time = time.time()
                 metadata_llm = kwargs.pop('metadata', None)
                 contexts = kwargs.pop('contexts', None)
+                expected = kwargs.pop('expected', None)
                 response = orig_invoke(self_instance, *args, **kwargs)
                 duration = time.time() - start_time
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
                 tools = kwargs.pop('tools', None)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
+                self._log_trace(
+                    input_messages=input_messages,
+                    response=response,
+                    metadata_llm=metadata_llm,
+                    contexts=contexts,
+                    expected=expected,
+                    duration=duration,
+                    tools=tools, 
+                    callback_result=cb_result, 
+                    **kwargs
+                )
                 return response
             client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
         
@@ -568,12 +581,23 @@ class RagMetricsClient:
                 start_time = time.time()
                 metadata_llm = kwargs.pop('metadata', None) 
                 contexts = kwargs.pop('contexts', None)
+                expected = kwargs.pop('expected', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
                 tools = kwargs.pop('tools', None)
                 input_messages = kwargs.pop('input', None)
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
+                self._log_trace(
+                    input_messages=input_messages,
+                    response=response,
+                    metadata_llm=metadata_llm,
+                    contexts=contexts,
+                    expected=expected,
+                    duration=duration, 
+                    tools=tools, 
+                    callback_result=cb_result, 
+                    **kwargs
+                )
                 return response
             if isinstance(client, type):
                 setattr(client, "invoke", invoke_wrapper)
@@ -586,12 +610,23 @@ class RagMetricsClient:
                 start_time = time.time()
                 metadata_llm = kwargs.pop('metadata', None)
                 contexts = kwargs.pop('contexts', None)
+                expected = kwargs.pop('expected', None)
                 response = orig_invoke(*args, **kwargs)
                 duration = time.time() - start_time
                 tools = kwargs.pop('tools', None)
                 input_messages = kwargs.get('messages')
                 cb_result = callback(input_messages, response)
-                self._log_trace(input_messages, response, metadata_llm, contexts, duration, tools, callback_result=cb_result, **kwargs)
+                self._log_trace(
+                    input_messages=input_messages,
+                    response=response,
+                    metadata_llm=metadata_llm,
+                    contexts=contexts,
+                    expected=expected,
+                    duration=duration, 
+                    tools=tools, 
+                    callback_result=cb_result, 
+                    **kwargs
+                )
                 return response
             client.completion = lite_wrapper
         

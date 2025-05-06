@@ -14,7 +14,7 @@ class ReviewQueue(RagMetricsObject):
     
     object_type = "reviews"
 
-    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None):
+    def __init__(self, name, condition="", criteria=None, judge_model=None, dataset=None, retroactive=False):
         """
         Initialize a new ReviewQueue instance.
 
@@ -25,12 +25,14 @@ class ReviewQueue(RagMetricsObject):
             criteria (list or str, optional): Evaluation criteria to apply.
             judge_model (str, optional): LLM model to use for automated evaluation.
             dataset (Dataset or str, optional): Dataset to use for evaluation.
+            retroactive (bool, optional): Whether the review queue should apply to existing traces (default: False).
         """
         self.name = name
         self.condition = condition
-        self.criteria = criteria
+        self.criteria = self._process_criteria(criteria)
         self.judge_model = judge_model
-        self.dataset = dataset
+        self.dataset = self._process_dataset(dataset)
+        self.retroactive = retroactive
         self.id = None  
         self._traces = None
         self.edit_mode = False  
@@ -97,7 +99,10 @@ class ReviewQueue(RagMetricsObject):
             ValueError: If the dataset is invalid or not found.
             Exception: If the dataset cannot be found on the server.
         """
-        if isinstance(dataset, Dataset):
+        if dataset is None:
+            return None
+        
+        elif isinstance(dataset, Dataset):
             # Check if full attributes are present.
             if dataset.name and getattr(dataset, "examples", None) and len(dataset.examples) > 0:
                 # Full dataset provided: save it to get a new id.
@@ -119,12 +124,14 @@ class ReviewQueue(RagMetricsObject):
                         raise Exception(f"Dataset with name '{dataset.name}' not found on server.")
                 else:
                     raise Exception("Dataset object missing required attributes.")
+                
         elif isinstance(dataset, int):
             downloaded = Dataset.download(id=dataset)
             if downloaded and getattr(downloaded, "id", None):
                 return downloaded.id
             else:
                 raise Exception(f"Dataset not found on server with id: {dataset}")
+            
         elif isinstance(dataset, str):
             downloaded = Dataset.download(name=dataset)
             if downloaded and getattr(downloaded, "id", None):
@@ -231,6 +238,7 @@ class ReviewQueue(RagMetricsObject):
             "criteria": self._process_criteria(self.criteria),
             "judge_model": self.judge_model,
             "dataset": self._process_dataset(self.dataset),
+            "retroactive": self.retroactive,
             "edit": self.edit_mode,
             "id": self.id if self.edit_mode else None
         }
@@ -253,7 +261,8 @@ class ReviewQueue(RagMetricsObject):
             condition=data.get("condition", ""),
             criteria=data.get("criteria", []),
             judge_model=data.get("judge_model", None),
-            dataset=data.get("dataset", None)
+            dataset=data.get("dataset", None),
+            retroactive=data.get("retroactive", False)
         )
         rq.id = data.get("id")
         traces_data = data.get("traces", [])
