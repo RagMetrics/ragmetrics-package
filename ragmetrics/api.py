@@ -299,11 +299,11 @@ class RagMetricsClient:
             self, 
             input_messages, 
             response, 
-            metadata_llm, 
-            contexts,
-            expected,
-            duration, 
-            tools, 
+            metadata_llm=None, 
+            contexts=None,
+            expected=None,
+            duration=None, 
+            tools=None, 
             callback_result=None,
             **kwargs
         ):
