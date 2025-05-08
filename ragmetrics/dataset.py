@@ -1,4 +1,7 @@
 from .api import RagMetricsObject
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Example:
     """
@@ -117,7 +120,10 @@ class Dataset(RagMetricsObject):
                 
                 # Save to RagMetrics platform
                 dataset.save()
-                print(f"Dataset saved with ID: {dataset.id}")
+                if dataset.id:
+                    logger.info(f"Dataset saved with ID: {dataset.id}")
+                else:
+                    logger.info("Dataset saved but no ID returned.")
             
         Example - Downloading and using an existing dataset:
         
@@ -215,3 +221,21 @@ class Dataset(RagMetricsObject):
             iterator: An iterator over the dataset's examples.
         """
         return iter(self.examples)
+
+    def get_questions(self):
+        questions = []
+        for example in self.examples:
+            questions.append(example.question)
+        return questions
+
+    def __str__(self):
+        s = f"Dataset: {self.name} (ID: {self.id})\n"
+        for i, example in enumerate(self.examples):
+            s += f"Example {i+1}:\n"
+            s += f"  Question: {example.question}\n"
+            if example.ground_truth_answer:
+                s += f"  Answer: {example.ground_truth_answer}\n"
+            if example.ground_truth_context:
+                s += f"  Contexts: {len(example.ground_truth_context)}\n"
+        s += f"Dataset contains {len(self.examples)} examples"
+        return s

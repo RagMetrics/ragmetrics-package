@@ -2,12 +2,16 @@ import concurrent.futures
 import requests
 import time
 import json
+import logging
 from tqdm import tqdm
 from ragmetrics.api import ragmetrics_client  
 from ragmetrics.tasks import Task
 from ragmetrics.dataset import Dataset 
 from ragmetrics.criteria import Criteria
 from ragmetrics.utils import import_function
+from typing import Any, Dict, List, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 # --- Cohort Object ---
 class Cohort:
@@ -304,7 +308,7 @@ class Experiment:
                 )
                 
                 # Print cohorts that were automatically created
-                print(experiment.cohorts)
+                logger.info(experiment.cohorts)
                 
                 results = experiment.run()
 
@@ -479,7 +483,8 @@ class Experiment:
                     cohort_obj = Cohort(**c)
                     cohorts_list.append(cohort_obj)
                 else:
-                    raise ValueError("Each cohort must be a Cohort object or a dict.")
+                    logger.info(cohorts)
+                    raise TypeError(f"Cohort must be Cohort object or dict, got {type(c)}")
         else:
             raise ValueError("Cohorts must be provided as a JSON string or a list.")
         
@@ -750,7 +755,7 @@ class Experiment:
         base_url = ragmetrics_client.base_url.rstrip('/')
         
         # Print a single status message.
-        print(f'Experiment "{self.name}" is running. Check progress at: {base_url}{results_url}')
+        logger.info(f'Experiment "{self.name}" is running. Check progress at: {base_url}{results_url}')
         
         headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
         progress_url = f"{base_url}/api/experiment/progress/{experiment_run_id}/"
@@ -776,7 +781,7 @@ class Experiment:
                         pbar.update(100 - last_progress)  
                         pbar.set_postfix({'Status': 'Finished!'})
                         pbar.close()  
-                        tqdm.write(f"Finished!")
+                        logger.info(f"Finished!")
                         return progress_data
                     
                     retry_count = 0

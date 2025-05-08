@@ -89,10 +89,9 @@ async def _dummy_async_langchain_wrapper(*args, **kwargs):
     # This is a placeholder for the actual async wrapper implementation
     # It should call the original async method and log the trace asynchronously
     # For now, it just indicates that the async wrapping is not yet fully implemented
-    print("Async LangChain wrapper called, but not fully implemented for logging.")
+    logger.warning("Async LangChain wrapper called, but not fully implemented for logging.")
     # In a real scenario, you'd fetch the original method and call it:
     # original_method = getattr(self, "_original_ainvoke_for_" + id(self)) 
-    # return await original_method(*args, **kwargs)
     # For testing, let's assume there is an original ainvoke to call if this dummy is set
     if hasattr(args[0], '_original_ainvoke_method'): # args[0] would be self (the client_or_class instance)
         return await args[0]._original_ainvoke_method(*(args[1:]), **kwargs)
