@@ -6,234 +6,54 @@ import time
 import json
 import uuid
 import logging
-from typing import Any, Callable, Optional
+import functools # For functools.reduce
+from typing import Any, Callable, Optional, List, Dict
+
+# Imports for type hinting and specific client SDKs if needed for checks
+try:
+    from agents import Runner
+except ImportError:
+    Runner = None # Define as None if openai-agents is not installed
+
+# Local project imports
+from .utils import default_callback
+from .client_integrations import find_integration
 
 logger = logging.getLogger(__name__)
 
-# Keep these functions for backward compatibility
-def default_input(raw_input):
-    """
-    Format input messages into a standardized string format.
-    
-    Handles various input formats (list of messages, single message object, etc.)
-    and converts them into a consistent string representation.
-    
-    Args:
-        raw_input: The input to format. Can be a list of messages, a dictionary
-                  with role/content keys, an object with role/content attributes,
-                  or a primitive value.
-    
-    Returns:
-        str: Formatted string representation of the input, or None if input is empty.
-    """
-    # Input processing
-    if isinstance(raw_input, list) and len(raw_input) > 0:
-        raw_input = raw_input[-1]
-    
-    if isinstance(raw_input, dict) and "content" in raw_input:
-        content = raw_input.get('content', '')
-    elif hasattr(raw_input, "content"):
-        content = raw_input.content
-    else:
-        content = str(raw_input)
-    return content
+# --- Custom Exceptions --- 
+class RagMetricsError(Exception):
+    """Base exception class for RagMetrics errors."""
+    pass
 
-def default_output(raw_response):
-    """
-    Extract content from various types of LLM responses.
-    
-    Handles different response formats from various LLM providers and APIs,
-    extracting the actual content in a consistent way.
-    
-    Args:
-        raw_response: The response object from the LLM. Can be OpenAI ChatCompletion,
-                     object with text/content attributes, or another response format.
-    
-    Returns:
-        str: The extracted content from the response, or the raw response if content
-             cannot be extracted.
-    """
-    if not raw_response:
-        return None
-        
-    # Handle tool_calls in the response (OpenAI function calling API)
-    if isinstance(raw_response, dict) and "choices" in raw_response:
-        try:
-            message = raw_response["choices"][0]["message"]
-            if message.get("tool_calls") and not message.get("content"):
-                tool_call = message["tool_calls"][0]
-                if tool_call["type"] == "function":
-                    func_name = tool_call["function"]["name"]
-                    # Parse the JSON arguments
-                    args_dict = json.loads(tool_call["function"]["arguments"])
-                    # Format args as key=value pairs with proper quoting for strings
-                    args_str = ", ".join(
-                        f"{k}={repr(v) if isinstance(v, str) else v}" 
-                        for k, v in args_dict.items()
-                    )
-                    return f"={func_name}({args_str})"
-        except Exception as e:
-            logger.error("Error formatting tool_calls from response: %s", e)
-            
-    # Also handle object-style responses (OpenAI client library)
-    if hasattr(raw_response, "choices") and raw_response.choices:
-        try:
-            message = raw_response.choices[0].message
-            if hasattr(message, "tool_calls") and message.tool_calls and (not message.content or message.content is None):
-                tool_call = message.tool_calls[0]
-                if tool_call.type == "function":
-                    func_name = tool_call.function.name
-                    # Parse the JSON arguments
-                    args_dict = json.loads(tool_call.function.arguments)
-                    # Format args as key=value pairs with proper quoting for strings
-                    args_str = ", ".join(
-                        f"{k}={repr(v) if isinstance(v, str) else v}" 
-                        for k, v in args_dict.items()
-                    )
-                    return f"={func_name}({args_str})"
-            return message.content
-        except Exception as e:
-            logger.error("Error extracting content from response.choices: %s", e)
-    
-    # Handle other response types
-    if hasattr(raw_response, "text"):
-        content = raw_response.text
-    if hasattr(raw_response, "content"):
-        content = raw_response.content
-    else:
-        content = str(raw_response)
-    return content
+class RagMetricsConfigError(RagMetricsError):
+    """Exception for configuration-related errors."""
+    pass
 
-def default_callback(raw_input, raw_output) -> dict:
-    """
-    Create a standardized callback result dictionary.
-    
-    This is the default callback used by the monitor function when no custom
-    callback is provided.
+class RagMetricsAuthError(RagMetricsError):
+    """Exception for authentication failures."""
+    def __init__(self, message, status_code=None, response_text=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
 
+    def __str__(self):
+        s = super().__str__()
+        if self.status_code: s += f" (Status Code: {self.status_code})"
+        return s
 
-    Args:
-        raw_input: The raw input to the LLM.
-        raw_output: The raw output from the LLM.
+class RagMetricsAPIError(RagMetricsError):
+    """Exception for errors returned by the RagMetrics API."""
+    def __init__(self, message, status_code=None, response_text=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
 
-
-    Returns:
-        dict: A dictionary containing formatted input and output.
-    """
-    return {
-        "input": default_input(raw_input),
-        "output": default_output(raw_output)
-    }
-
-def trace_function_call(func):
-    """
-    Decorator to trace function execution and log structured input/output.
-    
-    Wrap a function with this decorator to automatically log its execution
-    details to RagMetrics, including inputs, outputs, and timing information.
-    This is particularly useful for tracking retrieval functions in RAG applications.
-
-    Example - Tracing a weather API function:
-        
-        .. code-block:: python
-        
-            import requests
-            import ragmetrics
-            from ragmetrics import trace_function_call
-            
-            # First, login to RagMetrics
-            ragmetrics.login("your-api-key")
-            
-            # Apply the decorator to your function
-            @trace_function_call
-            def get_weather(latitude, longitude):
-                response = requests.get(
-                    f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m"
-                )
-                data = response.json()
-                return data['current']['temperature_2m']
-                
-            # Now when you call the function, it's automatically traced
-            temperature = get_weather(48.8566, 2.3522)  # Paris coordinates
-        
-    Example - Tracing a document retrieval function:
-    
-        .. code-block:: python
-        
-            @trace_function_call
-            def retrieve_documents(query, top_k=3):
-                # Connect to your vector database
-                results = vector_db.search(query, limit=top_k)
-                return [doc.text for doc in results]
-                
-            # The function call, arguments, and return value will be logged
-            contexts = retrieve_documents("What is the capital of France?")
-            
-
-    Args:
-        func: The function to be traced.
-
-
-    Returns:
-        Callable: A wrapped version of the function that logs execution details.
-    """
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        duration = time.time() - start_time
-
-        # Format parameters in the requested format
-        params = []
-        # Add positional arguments
-        for i, arg in enumerate(args):
-            # Try to get the parameter name from the function signature
-            try:
-                import inspect
-                sig = inspect.signature(func)
-                param_names = list(sig.parameters.keys())
-                if i < len(param_names):
-                    params.append(f"{param_names[i]}={repr(arg)}")
-                else:
-                    params.append(f"{repr(arg)}")
-            except:
-                params.append(f"{repr(arg)}")
-        
-        # Add keyword arguments
-        for k, v in kwargs.items():
-            params.append(f"{k}={repr(v)}")
-        
-        # Create the formatted function call string
-        formatted_call = f"={func.__name__}({', '.join(params)})"
-
-        # Prepare structured input format
-        function_input = [
-            {
-                "role": "user",
-                "content": formatted_call,
-                "tool_call": True
-            }
-        ]
-
-        function_output = {
-            "result": result
-        }
-
-        # Log the function execution
-        ragmetrics_client._log_trace(
-            input_messages=function_input,
-            response=function_output,
-            metadata_llm=None,
-            contexts=None,
-            duration=duration,
-            tools=None,  
-            callback_result={
-                "input": formatted_call,
-                "output": result
-            }
-        )
-        return result
-
-    return wrapper
+    def __str__(self):
+        s = super().__str__()
+        if self.status_code: s += f" (Status Code: {self.status_code})"
+        if self.response_text: s += f" Response: {self.response_text[:200]}..." 
+        return s
 
 class RagMetricsClient:
     """
@@ -255,11 +75,13 @@ class RagMetricsClient:
         Creates an unauthenticated client. Call the login() method to authenticate
         before using other functionality.
         """
-        self.access_token = None
-        self.base_url = 'https://ragmetrics.ai'
-        self.logging_off = False
-        self.metadata = None
-        self.conversation_id = str(uuid.uuid4())
+        self.access_token: Optional[str] = None
+        # Initialize base_url from env var or default, login can override
+        self.base_url: str = os.environ.get('RAGMETRICS_BASE_URL', 'https://ragmetrics.ai') 
+        self.logging_off: bool = False
+        self.metadata: Optional[dict] = None 
+        self.conversation_id: str = str(uuid.uuid4())
+        logger.info(f"RagMetricsClient initialized. Default Base URL: {self.base_url}")
     
     def new_conversation(self, id: Optional[str] = None):
         """
@@ -273,6 +95,7 @@ class RagMetricsClient:
             id: Optional custom conversation ID. If not provided, a new UUID will be generated.
         """
         self.conversation_id = id if id is not None else str(uuid.uuid4())
+        logger.debug(f"RagMetrics: Started new conversation: {self.conversation_id}")
 
     def _find_external_caller(self) -> str:
         """
@@ -286,26 +109,42 @@ class RagMetricsClient:
                  or an empty string if none is found.
         """
         external_caller = ""
-        frame = sys._getframe()
-        while frame:
-            module_name = frame.f_globals.get("__name__", "")
-            if not module_name.startswith("ragmetrics"):
-                external_caller = frame.f_code.co_name
-                break
-            frame = frame.f_back
+        try:
+            frame = sys._getframe().f_back # Start one frame back to exclude this method itself
+            # Traverse up to a certain limit to avoid excessively deep stack walks
+            for _ in range(10): # Limit depth to 10 frames for performance/safety
+                if not frame: break
+                module_name = frame.f_globals.get("__name__", "")
+                if (not module_name.startswith("ragmetrics.") and 
+                    module_name != "ragmetrics" and 
+                    not module_name.startswith("__main__") and 
+                    # Exclude common interactive environments
+                    not module_name.startswith("ipykernel.") and 
+                    not module_name.startswith("IPython.") and 
+                    "<module>" not in frame.f_code.co_name):
+                    external_caller = frame.f_code.co_name
+                    break
+                frame = frame.f_back
+        except Exception as e:
+            logger.debug(f"RagMetrics: Error finding external caller: {e}")
         return external_caller
 
     def _log_trace(
             self, 
-            input_messages, 
-            response, 
-            metadata_llm, 
-            contexts,
-            expected,
-            duration, 
-            tools, 
-            callback_result=None,
-            **kwargs
+            input_messages: Any, # Can be list of dicts, string, etc.
+            response: Any,       # Can be dict, object, string, etc.
+            metadata_llm: Optional[dict],
+            contexts: Optional[list],
+            expected: Optional[Any],
+            duration: float,
+            tools: Optional[list],
+            callback_result: Optional[dict] = None,
+            conversation_id: Optional[str] = None,
+            force_new_conversation: bool = False, # New flag for explicit control
+            error: Optional[Exception] = None, # Added error to signature
+            model_name: Optional[str] = None, # Added model_name
+            tool_choice: Optional[Any] = None, # Added tool_choice
+            **kwargs # For any additional passthrough data to the payload root
         ):
         """
         Log a trace of an LLM interaction to the RagMetrics API.
@@ -317,322 +156,359 @@ class RagMetricsClient:
     
     Args:
             input_messages: The input messages sent to the LLM (prompts, queries, etc.).
-            response: The response received from the LLM. Follows OpenAI message list standard.            
+            response: The response received from the LLM.
             metadata_llm: Additional metadata about the LLM and the interaction.
             contexts: Context information or retrieved documents used in the interaction.
-            expected: The expected output from the LLM.
+            expected: The expected output from the LLM (for evaluation).
             duration: The duration of the interaction in seconds.
-            tools: Any tools or functions used during the interaction.
-            callback_result: Optional processed results from a custom callback function.
-            **kwargs: Additional keyword arguments to include in the trace.
-
-    
-    Raises:
-            ValueError: If access token is missing.
-
-    
-    Returns:
-            Response: The API response from logging the trace.
+            tools: Any tools or functions used/available during the interaction.
+            callback_result: Processed results from a callback (e.g., default_callback).
+            conversation_id: Specific conversation ID for this trace, overrides client's current.
+            force_new_conversation: Flag to force a new conversation for the trace.
+            error: Optional exception object if the interaction resulted in an error.
+            model_name: Optional name of the LLM used for the interaction.
+            tool_choice: Optional choice of tool used for the interaction.
+            **kwargs: Additional keyword arguments to include at the root of the trace payload.
+        Returns:
+            Response: The API response from logging the trace, or None if logging is off.
         """
         if self.logging_off:
-            return
-
+            logger.debug("RagMetrics: Logging is off, skipping trace.")
+            return None
         if not self.access_token:
-            raise ValueError("Missing access token. Please log in.")
+            logger.warning("RagMetrics: Not logged in. Trace not sent. Call login() first.")
+            return None
         
-        if isinstance(input_messages, list) and len(input_messages) == 1 \
-            and not input_messages[0].get("tool_call", False) is True:
+        current_trace_conversation_id: str
+        if force_new_conversation:
             self.new_conversation()
-
-        # If response is a pydantic model, dump it. Supports both pydantic v2 and v1.
-        if hasattr(response, "model_dump"):
-            #Pydantic v2
-            response_processed = response.model_dump() 
-        if hasattr(response, "dict"):
-            #Pydantic v1
-            response_processed = response.dict()
+            current_trace_conversation_id = self.conversation_id
+            logger.debug(f"RagMetrics: Forced new conversation for trace: {current_trace_conversation_id}")
+        elif conversation_id is not None:
+            current_trace_conversation_id = conversation_id # Use explicitly passed ID
         else:
-            response_processed = response
+            # Apply heuristic only if no explicit conversation ID and not forced
+            current_trace_conversation_id = self.conversation_id # Start with current client ID
+            is_likely_new_interaction = False
+            if isinstance(input_messages, list) and len(input_messages) == 1:
+                first_message = input_messages[0]
+                is_continuation = False
+                if isinstance(first_message, dict):
+                    role = first_message.get("role")
+                    is_continuation = first_message.get("tool_call_id") or first_message.get("tool_calls") or role in ["assistant", "tool", "system"]
+                if not is_continuation:
+                    is_likely_new_interaction = True
+            elif isinstance(input_messages, str): 
+                 is_likely_new_interaction = True
+            
+            if is_likely_new_interaction:
+                self.new_conversation()
+                current_trace_conversation_id = self.conversation_id # Use the new ID
+                logger.debug(f"RagMetrics: Heuristically started new conversation for trace: {current_trace_conversation_id}")
+            else:
+                 logger.debug(f"RagMetrics: Continuing conversation for trace: {current_trace_conversation_id}")
 
-        # Merge context and metadata dictionaries; treat non-dict values as empty.
+        response_processed = response
+        if hasattr(response, "model_dump") and callable(response.model_dump):
+            response_processed = response.model_dump() 
+        elif hasattr(response, "dict") and callable(response.dict):
+            response_processed = response.dict()
+
         union_metadata = {}
         if isinstance(self.metadata, dict):
             union_metadata.update(self.metadata)
         if isinstance(metadata_llm, dict):
             union_metadata.update(metadata_llm)
 
-        # Construct the payload with placeholders for callback result
         payload = {
             "raw": {
-                "input": input_messages,
-                "output": response_processed,
-                "id": str(uuid.uuid4()),
+                "input": input_messages, # Keep raw input as is
+                "output": response_processed, # Keep raw (processed) output as is
+                "id": str(uuid.uuid4()), # Unique ID for this specific raw log entry
                 "duration": duration,
-                "caller": self._find_external_caller()
+                "caller": self._find_external_caller(),
+                "error": str(error) if error else None
             },
             "metadata": union_metadata,
             "contexts": contexts,
             "expected": expected,
             "tools": tools,
-            "input": None,
-            "output": None,
-            "scores": None,
-            "conversation_id": self.conversation_id
+            "tool_choice": tool_choice,
+            "model_name": model_name,
+            "input": None, # Placeholder, to be filled by callback_result
+            "output": None, # Placeholder, to be filled by callback_result
+            "scores": None, # Placeholder for potential future score passing
+            "conversation_id": current_trace_conversation_id
         }
 
-        # Process callback_result if provided
-        for key in ["input", "output", "expected"]:
-            if key in callback_result:
-                payload[key] = callback_result[key]
+        # Apply callback_result if provided and valid
+        if isinstance(callback_result, dict):
+            for key in ["input", "output", "expected", "scores"]:
+                if key in callback_result:
+                    payload[key] = callback_result[key]
+        
+        # Merge any additional kwargs into the payload root
+        if kwargs:
+            payload.update(kwargs)
 
-        # Serialize
-        payload_str = json.dumps(
-            payload, 
-            indent=4, 
-            default=lambda o: (
-                o.model_dump() if hasattr(o, "model_dump")
-                else o.dict() if hasattr(o, "dict")
-                else str(o)
-            )
-        )
-        payload = json.loads(payload_str)
+        try:
+            def serialize_default(o):
+                if hasattr(o, "model_dump_json") and callable(o.model_dump_json): 
+                    try: return json.loads(o.model_dump_json())
+                    except: return o.model_dump_json() 
+                if hasattr(o, "model_dump") and callable(o.model_dump): return o.model_dump()
+                if hasattr(o, "dict") and callable(o.dict): return o.dict()
+                if isinstance(o, uuid.UUID) or type(o).__name__ == 'datetime': return str(o)
+                if isinstance(o, time.struct_time): return time.strftime("%Y-%m-%dT%H:%M:%SZ", o)
+                if isinstance(o, Exception): return str(o) # Serialize exceptions
+                try: return str(o)
+                except: return f"<unserializable:{type(o).__name__}>"
+            payload_final = json.loads(json.dumps(payload, indent=4, default=serialize_default))
+        except Exception as e: # Catch broader exceptions during the complex serialization
+            logger.error(f"RagMetrics: Error serializing payload to JSON: {e}. Payload (first 500 chars): {str(payload)[:500]}")
+            return None 
 
         log_resp = self._make_request(
             method='post',
             endpoint='/api/client/logtrace/',
-            json=payload,
+            json=payload_final,
             headers={
                 "Authorization": f"Token {self.access_token}",
                 "Content-Type": "application/json"
             }
         )
+
+        if log_resp and log_resp.status_code >= 400:
+             logger.warning(f"RagMetrics: API returned error on log trace: {log_resp.status_code} - {log_resp.text[:200]}") # Limit response text
+        elif log_resp:
+             logger.debug(f"RagMetrics: Trace logged successfully (Conv ID: {current_trace_conversation_id}).")
+             
         return log_resp
 
-    def login(self, key, base_url=None, off=False):
+    async def _alog_trace(
+        self,
+        input_messages: Any,
+        response: Any,
+        expected: Optional[Any] = None,
+        contexts: Optional[List[Any]] = None,
+        metadata_llm: Optional[Dict[str, Any]] = None,
+        error: Optional[Exception] = None,
+        duration: Optional[float] = None,
+        model_name: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None, # Or Dict for specific function call
+        callback_result: Optional[Any] = None,
+        force_new_conversation: bool = False,
+        **additional_kwargs
+    ):
+        """Placeholder for asynchronous trace logging."""
+        # TODO: Implement true async HTTP request here (e.g., using httpx.AsyncClient)
+        logger.error("RagMetrics: _alog_trace is using synchronous _log_trace. Implement full async logging.")
+        # For now, delegate to sync version (not ideal for performance in async contexts)
+        return self._log_trace(
+            input_messages=input_messages,
+            response=response,
+            expected=expected,
+            contexts=contexts,
+            metadata_llm=metadata_llm,
+            error=error,
+            duration=duration,
+            model_name=model_name,
+            tools=tools,
+            tool_choice=tool_choice,
+            callback_result=callback_result,
+            force_new_conversation=force_new_conversation,
+            **additional_kwargs
+        )
+
+    def login(self, key: Optional[str]=None, base_url: Optional[str]=None, off: bool=False) -> bool:
         """
         Authenticate with the RagMetrics API.
-        
-        This method must be called before using other functionality that requires
-        authentication. It can use an explicit API key or look for one in the
-        RAGMETRICS_API_KEY environment variable.
-
-    
-    Args:
-            key: The API key for authentication. Get this from your RagMetrics dashboard.
-            base_url: Optional custom base URL for the API (default: https://ragmetrics.ai).
-            off: Whether to disable logging entirely (default: False).
-
-    
-    Raises:
-            ValueError: If no API key is provided or if the key is invalid.
-
-    
-    Returns:
-            bool: True if login is successful.
+        Raises RagMetricsConfigError, RagMetricsAuthError, RagMetricsAPIError on failure.
+        Returns True on success or if logging is off.
         """
         if off:
             self.logging_off = True
-        else:
-            self.logging_off = False
-
-        if not key:
-            if 'RAGMETRICS_API_KEY' in os.environ:
-                key = os.environ['RAGMETRICS_API_KEY']
-        if not key:
-            raise ValueError("Missing access token. Please get one at RagMetrics.ai.")
-
-        if base_url:
-            self.base_url = base_url
-        elif 'RAGMETRICS_BASE_URL' in os.environ:
-            self.base_url = os.environ['RAGMETRICS_BASE_URL']
-        else:
-            self.base_url = 'https://ragmetrics.ai'
-
-        response = self._make_request(
-            method='post',
-            endpoint='/api/client/login/',
-            json={"key": key}
-        )
-
-        if response.status_code == 200:
-            self.access_token = key
-            self.new_conversation()
+            self.access_token = None
+            logger.info("RagMetrics: Logging explicitly disabled.")
             return True
-        raise ValueError("Invalid access token. Please get a new one at RagMetrics.ai.")
-
-    def _original_llm_invoke(self, client):
-        """
-        Get the original LLM invocation function from a client object.
         
-        Used internally to identify the correct function to wrap when monitoring
-        various types of LLM clients.
+        self.logging_off = False # Ensure logging is enabled if off=False
 
-    
-    Args:
-            client: The LLM client object to analyze.
+        # Determine API key: Arg > Env Var
+        api_key_to_use = key or os.environ.get('RAGMETRICS_API_KEY')
+        if not api_key_to_use:
+            self.logging_off = True # Disable logging
+            raise RagMetricsConfigError("Missing API key. Provide key to login() or set RAGMETRICS_API_KEY environment variable.")
 
-    
-    Returns:
-            Callable: The original LLM invocation function.
+        # Determine base URL: Arg > Env Var > Current/Default
+        base_url_to_use = base_url or os.environ.get('RAGMETRICS_BASE_URL', self.base_url) 
+        self.base_url = base_url_to_use # Update client's base_url
+
+        try:
+            logger.info(f"RagMetrics: Attempting login to {self.base_url}...")
+            response = self._make_request(method='post', endpoint='/api/client/login/', json={"key": api_key_to_use})
             
-    
-    Raises:
-            ValueError: If the client type is not supported.
-        """
-        if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
-            return type(client.chat.completions).create
-        elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
-            return getattr(client, "invoke")
-        elif hasattr(client, "completion"):
-            return client.completion
-        else:
-            raise ValueError("Unsupported client")
+            if response is None: # _make_request failed (e.g., network error)
+                 raise RagMetricsAPIError("Login request failed. Check network connectivity or base URL.")
+            
+            if response.status_code in [401, 403]:
+                 raise RagMetricsAuthError(f"Authentication failed (Status: {response.status_code}). Check API key.", status_code=response.status_code, response_text=response.text)
+            
+            response.raise_for_status() # Raise HTTPError for other bad responses (4xx client error, 5xx server error)
 
-    def _make_request(self, endpoint, method="post", **kwargs):
+            # Success
+            self.access_token = api_key_to_use
+            self.new_conversation() 
+            logger.info(f"RagMetrics: Successfully logged in. Base URL: {self.base_url}")
+            return True
+
+        except requests.exceptions.HTTPError as e:
+            # Handle non-auth HTTP errors specifically
+            logger.error(f"RagMetrics: Login request failed. HTTP Error {e.response.status_code} for {e.request.url}. Response: {e.response.text}")
+            self.access_token = None
+            self.logging_off = True
+            raise RagMetricsAPIError(f"Login request failed (Status: {e.response.status_code}).", status_code=e.response.status_code, response_text=e.response.text) from e
+        except RagMetricsError: # Re-raise our custom errors
+             self.access_token = None
+             self.logging_off = True
+             raise
+        except Exception as e:
+            # Catch any other unexpected errors during login
+            logger.error(f"RagMetrics: An unexpected error occurred during login: {e}", exc_info=True)
+            self.access_token = None
+            self.logging_off = True
+            raise RagMetricsError(f"An unexpected error occurred during login: {e}") from e
+
+    def _make_request(self, endpoint: str, method: str ="post", **kwargs) -> Optional[requests.Response]:
+        """Internal method to make API requests, handling common errors."""
+        if not self.access_token and "/api/client/login/" not in endpoint: # Allow login requests without token
+             logger.error("RagMetrics: Attempted API call without access token. Please login first.")
+             return None # Cannot make request without token (except login)
+             
+        url = f"{self.base_url.rstrip('/')}{endpoint}"
+        response = None
+        try:
+            kwargs.setdefault('timeout', 15)
+            logger.debug(f"RagMetrics: Sending {method.upper()} request to {url} with timeout {kwargs['timeout']}s")
+            response = requests.request(method, url, **kwargs) 
+            # Check for API-level errors even if HTTP status is 2xx but response indicates issue
+            # (This depends on API contract, but good practice to check)
+            # if response.status_code < 400 and response.content and "error" in response.text.lower():
+            #     logger.warning(f"RagMetrics: API request to {url} succeeded (HTTP {response.status_code}) but response contains potential error: {response.text[:200]}")
+
+        except requests.exceptions.Timeout:
+            logger.error(f"RagMetrics: Request to {url} timed out after {kwargs['timeout']} seconds.")
+            # Return None, let caller handle timeout
+        except requests.exceptions.ConnectionError as e:
+             logger.error(f"RagMetrics: Connection error for {url}. Check network or base URL. Error: {e}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"RagMetrics: Request to {url} failed: {e}")
+            # Log specific HTTP errors if available in the exception context
+            if e.response is not None:
+                 logger.error(f"RagMetrics: Status Code: {e.response.status_code}, Response: {e.response.text[:200]}")
+        except Exception as e:
+             logger.error(f"RagMetrics: Unexpected error during request to {url}: {e}", exc_info=True)
+
+        return response # Return the response object (or None on critical failure)
+
+    def monitor(self, client: Any, metadata: Optional[dict] = None, callback: Optional[Callable[[Any, Any], dict]] = None) -> Any:
         """
-        Make an HTTP request to the RagMetrics API.
+        Monitor an LLM client by finding a matching integration in the registry and applying its wrapper.
+        """
+        if not hasattr(client, '__class__') and not isinstance(client, types.ModuleType):
+            client_type = type(client).__name__
+            logger.error(f"RagMetrics: Cannot monitor object of type '{client_type}'. Expected class instance, module, or specific known type like Runner.")
+            return client # Return unmodified
+            
+        if not self.access_token and not self.logging_off:
+            logger.warning("RagMetrics: Client not authenticated. Methods will be wrapped, but traces won't be logged until login() is successful.")
         
-        Used internally by various methods to communicate with the RagMetrics API.
-
-    
-    Args:
-            endpoint: The API endpoint to call (e.g., "/api/client/login/").
-            method: The HTTP method to use (default: "post").
-            **kwargs: Additional arguments to pass to the requests library.
-
-    
-    Returns:
-            Response: The HTTP response from the API.
-        """
-        url = f"{self.base_url}{endpoint}"
-        response = requests.request(method, url, **kwargs)
-        return response
-
-    def monitor(self, client, metadata, callback: Optional[Callable[[Any, Any], dict]] = None):
-        """
-        Monitor an LLM client's interactions by wrapping its API calls.
-        
-        This method creates a monitored version of an LLM client by wrapping its
-        API methods. All interactions with the wrapped client will be automatically
-        logged to RagMetrics.
-        
-        Supported client types:
-        * OpenAI API clients (client.chat.completions.create)
-        * LangChain (client.invoke)
-        * LiteLLM (client.completion)
-
-    
-    Args:
-            client: The LLM client to monitor.
-            metadata: Additional metadata to include with each logged interaction.
-            callback: Optional function to process inputs/outputs before logging.
-                     Should accept (input, output) and return a dict with "input" and "output" keys.
-
-    
-    Raises:
-            ValueError: If access token is missing or client type is unsupported.
-
-    
-    Returns:
-            The wrapped client with monitoring enabled.
-        """
-        if not self.access_token:
-            raise ValueError("Missing access token. Please get a new one at RagMetrics.ai.")
         if metadata is not None:
-            self.metadata = metadata
+            if self.metadata is None: self.metadata = {}
+            self.metadata.update(metadata)
+            logger.debug(f"RagMetrics: Updated client session metadata: {self.metadata}")
         
-        self.new_conversation()
+        current_callback = callback if callback is not None else default_callback
 
-        # Use default callback if none provided.
-        if callback is None:
-            callback = default_callback
-
-        orig_invoke = self._original_llm_invoke(client)
-
-        # Chat-based clients (OpenAI)
-        if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
-            def openai_wrapper(self_instance, *args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None)
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(self_instance, *args, **kwargs)
-                duration = time.time() - start_time
-                input_messages = kwargs.get('messages')
-                cb_result = callback(input_messages, response)
-                tools = kwargs.pop('tools', None)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration,
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
+        integration = find_integration(client)
         
-        # LangChain-style clients that support invoke (class or instance)
-        elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
-            def invoke_wrapper(*args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None) 
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(*args, **kwargs)
-                duration = time.time() - start_time
-                tools = kwargs.pop('tools', None)
-                input_messages = kwargs.pop('input', None)
-                cb_result = callback(input_messages, response)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration, 
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            if isinstance(client, type):
-                setattr(client, "invoke", invoke_wrapper)
+        if not integration:
+            client_name_for_log = getattr(client, '__name__', str(type(client)))
+            logger.warning(
+                f"RagMetrics: Client '{client_name_for_log}' was not matched by any integration in the registry. "
+                f"Automatic monitoring may not be active."
+            )
+            return client
+
+        logger.info(f"RagMetrics: Applying integration: {integration['name']}")
+        
+        wrapper_applied_count = 0
+        
+        # Resolve sync target object
+        target_object = client
+        target_object_path = integration.get("target_object_path")
+        if target_object_path:
+            path_parts = target_object_path.split('.')
+            try:
+                target_object = functools.reduce(getattr, path_parts, client)
+            except AttributeError:
+                logger.error(f"RagMetrics: Could not resolve target_object_path '{target_object_path}' for client type {type(client).__name__}. Monitoring may fail.")
+                return client # Stop if target cannot be found
+
+        # Apply synchronous wrappers
+        for method_name, wrapper_func in integration.get("methods_to_wrap", {}).items():
+            # Check if the target object actually has this method
+            if hasattr(target_object, method_name):
+                logger.debug(f"Attempting to wrap sync method: {method_name} on {type(target_object).__name__}")
+                try:
+                    # Call the specific wrapper function from the registry
+                    if wrapper_func(self, target_object, current_callback):
+                        wrapper_applied_count += 1
+                    else:
+                        logger.warning(f"Sync wrapper function for {method_name} reported failure.")
+                except Exception as e:
+                    logger.error(f"Error applying sync wrapper for {method_name}: {e}", exc_info=True)
             else:
-                client.invoke = types.MethodType(invoke_wrapper, client)
-        
-        # LiteLLM-style clients (module-level function)
-        elif hasattr(client, "completion"):
-            def lite_wrapper(*args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None)
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(*args, **kwargs)
-                duration = time.time() - start_time
-                tools = kwargs.pop('tools', None)
-                input_messages = kwargs.get('messages')
-                cb_result = callback(input_messages, response)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration, 
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            client.completion = lite_wrapper
-        
-        #Unknown client
+                logger.debug(f"Sync method '{method_name}' not found on target {type(target_object).__name__}")
+
+        # Resolve async target object
+        async_target_object = client
+        async_target_object_path = integration.get("async_target_object_path", target_object_path) # Default to sync path
+        if async_target_object_path and async_target_object_path != target_object_path:
+            # Only resolve again if path is different from sync path
+            path_parts = async_target_object_path.split('.')
+            try:
+                async_target_object = functools.reduce(getattr, path_parts, client)
+            except AttributeError:
+                logger.error(f"RagMetrics: Could not resolve async_target_object_path '{async_target_object_path}'. Async monitoring may fail.")
+                async_target_object = None # Mark as failed to resolve
+        elif async_target_object_path == target_object_path:
+             async_target_object = target_object # Use the already resolved sync target
+        # else: async_target_object remains the original client if no path specified
+
+        # Apply asynchronous wrappers
+        if async_target_object: # Only proceed if async target was resolved
+            for method_name, wrapper_func in integration.get("async_methods_to_wrap", {}).items():
+                if hasattr(async_target_object, method_name):
+                    logger.debug(f"Attempting to wrap async method: {method_name} on {type(async_target_object).__name__}")
+                    try:
+                        # Call the specific async wrapper function
+                        if wrapper_func(self, async_target_object, current_callback):
+                            wrapper_applied_count += 1
+                        else:
+                            logger.warning(f"Async wrapper function for {method_name} reported failure.")
+                    except Exception as e:
+                         logger.error(f"Error applying async wrapper for {method_name}: {e}", exc_info=True)
+                else:
+                     logger.debug(f"Async method '{method_name}' not found on target {type(async_target_object).__name__}")
+
+        if wrapper_applied_count > 0:
+            logger.info(f"RagMetrics: Monitoring applied for {wrapper_applied_count} method(s) on client '{getattr(client, '__name__', str(type(client)))}'.")
         else:
-            raise ValueError("Unsupported client")
+            logger.warning(f"RagMetrics: No wrappers were applied for client '{getattr(client, '__name__', str(type(client)))}' via integration '{integration['name']}'.")
+            
+        return client
 
 class RagMetricsObject:
     """
@@ -760,128 +636,20 @@ class RagMetricsObject:
 # Global client instance
 ragmetrics_client = RagMetricsClient()
 
-def login(key=None, base_url=None, off=False):
+def login(key: Optional[str]=None, base_url: Optional[str]=None, off: bool=False) -> bool:
     """
-    Create and authenticate a new RagMetricsClient instance.
-    
-    This is a convenience function that uses the global client instance.
-    
-    Example:
-    
-        .. code-block:: python
-        
-            # Login with explicit API key
-            ragmetrics.login(key="your-api-key")
-            
-            # Login with environment variable (recommended)
-            import os
-            os.environ['RAGMETRICS_API_KEY'] = 'your-api-key' 
-            ragmetrics.login()
-            
-            # Login with custom base URL (for testing/dev environments)
-            ragmetrics.login(base_url="https://staging.ragmetrics.ai")
-            
-            # Disable logging (useful for testing)
-            ragmetrics.login(off=True)
-
-
-    Args:
-        key: Optional API key for authentication. If not provided, will check
-             the RAGMETRICS_API_KEY environment variable.
-        base_url: Optional custom base URL for the API.
-        off: Whether to disable logging (default: False).
-
-
-    Returns:
-        bool: True if login was successful.
-        
-
-    Raises:
-        ValueError: If authentication fails.
+    Authenticate the global RagMetrics client. Convenience function.
+    Raises RagMetrics specific exceptions on failure.
     """
-    return ragmetrics_client.login(key, base_url, off)
+    try:
+        return ragmetrics_client.login(key=key, base_url=base_url, off=off)
+    except RagMetricsError as e:
+         # Log the error from the convenience function as well for visibility
+         logger.error(f"RagMetrics login failed: {e}")
+         raise # Re-raise the specific error
 
-def monitor(client, metadata=None, callback: Optional[Callable[[Any, Any], dict]] = None):
+def monitor(client: Any, metadata: Optional[dict]=None, callback: Optional[Callable[[Any, Any], dict]]=None) -> Any:
     """
-    Create a monitored version of an LLM client.
-    
-    This is a convenience function that uses the global client instance.
-    
-    Example for OpenAI:
-    
-        .. code-block:: python
-        
-            import openai
-            import ragmetrics
-            
-            # Login to RagMetrics
-            ragmetrics.login("your-api-key")
-            
-            # Create a monitored OpenAI client
-            openai_client = ragmetrics.monitor(openai.OpenAI(), metadata={"app": "my-app"})
-            
-            # Use the monitored client as normal - all calls will be logged
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini", 
-                messages=[{"role": "user", "content": "What is the capital of France?"}],
-                metadata={"request_id": "123"}, # Additional request-specific metadata
-                contexts=["Paris is the capital of France"] # Context provided to the LLM
-            )
-    
-    Example for LiteLLM:
-    
-        .. code-block:: python
-        
-            import litellm
-            import ragmetrics
-            
-            # Login to RagMetrics
-            ragmetrics.login("your-api-key")
-            
-            # Monitor LiteLLM
-            ragmetrics.monitor(litellm, metadata={"client": "litellm"})
-            
-            # All completions will be logged
-            response = litellm.completion(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": "What is the capital of France?"}],
-                metadata={"task": "geography_test"}
-            )
-        
-    Example with custom callback:
-    
-        .. code-block:: python
-        
-            import openai
-            import ragmetrics
-            
-            # Define a custom callback to process inputs/outputs before logging
-            def my_callback(raw_input, raw_output):
-                return {
-                    "input": raw_input,
-                    "output": raw_output,
-                    "expected": "Paris" # Optional expected answer for automatic evaluation
-                }
-                
-            # Monitor with custom callback
-            openai_client = ragmetrics.monitor(
-                openai.OpenAI(), 
-                metadata={"app": "qa-system"},
-                callback=my_callback
-            )
-
-
-    Args:
-        client: The LLM client to monitor.
-        metadata: Optional metadata for the monitoring session.
-        callback: Optional callback function for custom processing.
-
-
-    Returns:
-        The wrapped client with monitoring enabled.
-        
-
-    Raises:
-        ValueError: If not logged in or client type is unsupported.
+    Monitor an LLM client using the global RagMetrics client. Convenience function.
     """
-    return ragmetrics_client.monitor(client, metadata, callback)
+    return ragmetrics_client.monitor(client, metadata=metadata, callback=callback)

@@ -3,7 +3,7 @@ from datasets import load_dataset
 from dotenv import load_dotenv
 load_dotenv(".env")
 
-task_name = "halu_eval_v6"
+task_name = "halu_eval"
 
 #Set up the RAGMetrics client
 class StubLLMClient:

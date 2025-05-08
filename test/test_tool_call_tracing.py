@@ -3,16 +3,34 @@ import os
 import json
 import requests
 from dotenv import load_dotenv
+import pytest
+from unittest.mock import patch, MagicMock
 
 import ragmetrics
 from ragmetrics import trace_function_call
 from openai import OpenAI
+from ragmetrics.api import RagMetricsClient
 
 # Load environment variables from .env file
 load_dotenv(".env")
 
-# Login to RagMetrics - either with explicit key or from environment
-ragmetrics.login()
+# Attempt to login using environment variables
+ragmetrics.login(off=True)
+
+@pytest.fixture
+def logged_in_client():
+    """Fixture to provide a logged-in RagMetrics client instance."""
+    # If login(off=True) was called, this might not be truly logged in.
+    # Tests using this fixture might need to mock network calls or ensure login state.
+    client = ragmetrics.ragmetrics_client 
+    # Ensure logging is not off for tests that need it (override module-level setting)
+    client.logging_off = False 
+    # Mock _log_trace if tests focus on wrapper logic, not backend communication
+    # client._log_trace = MagicMock()
+    # Provide a dummy token if needed for internal checks, even if login was off
+    if not client.access_token:
+        client.access_token = "dummy-test-token" 
+    return client
 
 # Example 1: Weather API function
 @trace_function_call
