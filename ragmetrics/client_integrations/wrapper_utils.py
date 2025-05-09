@@ -66,7 +66,7 @@ def _extract_final_log_parameters(
     
     passthrough_kwargs = { 
         k: v for k, v in original_call_remaining_kwargs.items() 
-        if k not in ['model', 'tools', 'tool_choice']
+        if k not in ['model', 'tools', 'tool_choice', 'endpoint', 'method']
     }
     
     return {
@@ -92,35 +92,36 @@ def create_sync_wrapper(
     Creates a synchronous wrapper around an original method for RagMetrics logging.
     is_target_instance_method: True if the wrapper will be bound to an instance, False otherwise.
     """
-    # logger.debug(f"create_sync_wrapper: method {original_method.__name__ if hasattr(original_method, '__name__') else 'unknown'}, is_target_instance_method: {is_target_instance_method}")
+    method_name = getattr(original_method, '__name__', 'unknown_method')
+    logger.info(f"Creating sync wrapper for {method_name}, is_instance_method={is_target_instance_method}")
     
     def wrapper(*args, **kwargs):
-        # logger.debug(f"wrapper entered for {original_method.__name__ if hasattr(original_method, '__name__') else 'unknown'}. is_target_instance_method: {is_target_instance_method}. Args: {args}")
+        logger.info(f"RagMetrics SYNC wrapper for {method_name} CALLED with {len(args)} args")
         if rm_client.logging_off:
-            if is_target_instance_method:
-                return original_method(*(args[1:]), **kwargs) 
-            else:
-                return original_method(*args, **kwargs)
+            logger.debug(f"RagMetrics logging is OFF, calling original method directly")
+            return original_method(*args, **kwargs)
 
         start_time = time.time()
 
         rm_params = _pop_ragmetrics_kwargs(kwargs) # Use helper
         # kwargs now contains only params for original_method/dynamic_extractor
 
-        user_args = args[1:] if is_target_instance_method else args
-        log_input = input_extractor(user_args, kwargs)
+        # For both instance and class methods, use all args for extraction
+        # The extractors need to be able to handle the different formats
+        log_input = input_extractor(args, kwargs)
         dynamic_details = dynamic_llm_details_extractor(kwargs)
 
         error_obj, result, duration = None, None, 0.0
         try:
-            if is_target_instance_method:
-                result = original_method(*(args[1:]), **kwargs)
-            else:
-                result = original_method(*args, **kwargs)
+            # Call original method with all original args
+            logger.debug(f"Calling original method {method_name}")
+            result = original_method(*args, **kwargs)
         except Exception as e:
+            logger.error(f"Error in original method {method_name}: {e}")
             error_obj = e
         finally:
             duration = time.time() - start_time
+            logger.debug(f"Original method {method_name} completed in {duration:.2f}s")
 
         log_response = output_extractor(result) if error_obj is None else None
 
@@ -149,12 +150,25 @@ def create_sync_wrapper(
             "callback_result": callback_result,
             "force_new_conversation": rm_params["force_new_conversation"], # From helper result
         }
-        rm_client._log_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
+        
+        logger.info(f"Calling _log_trace for {method_name}")
+        try:
+            trace_result = rm_client._log_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
+            if trace_result:
+                logger.info(f"Successfully logged trace for {method_name}")
+            else:
+                logger.warning(f"Failed to log trace for {method_name}")
+        except Exception as e:
+            logger.error(f"Error logging trace for {method_name}: {e}", exc_info=True)
 
         if error_obj:
             raise error_obj
 
         return result
+    
+    # Add identifier for debugging
+    wrapper.__wrapped_method__ = method_name
+    wrapper.__ragmetrics_wrapped__ = True
     return wrapper 
 
 def create_async_wrapper(
@@ -172,34 +186,35 @@ def create_async_wrapper(
     Creates an asynchronous wrapper.
     is_target_instance_method: True if the wrapper will be bound to an instance, False otherwise.
     """
-    # logger.debug(f"create_async_wrapper: method {original_method.__name__ if hasattr(original_method, '__name__') else 'unknown'}, is_target_instance_method: {is_target_instance_method}")
+    method_name = getattr(original_method, '__name__', 'unknown_method')
+    logger.info(f"Creating async wrapper for {method_name}, is_instance_method={is_target_instance_method}")
 
     async def wrapper(*args, **kwargs):
-        # logger.debug(f"async wrapper entered for {original_method.__name__ if hasattr(original_method, '__name__') else 'unknown'}. is_target_instance_method: {is_target_instance_method}. Args: {args}")
+        logger.info(f"RagMetrics ASYNC wrapper for {method_name} CALLED with {len(args)} args")
         if rm_client.logging_off:
-            if is_target_instance_method:
-                 return await original_method(*(args[1:]), **kwargs) 
-            else:
-                 return await original_method(*args, **kwargs)
+            logger.debug(f"RagMetrics logging is OFF, calling original method directly")
+            return await original_method(*args, **kwargs)
 
         start_time = time.time()
 
         rm_params = _pop_ragmetrics_kwargs(kwargs) # Use helper
         
-        user_args = args[1:] if is_target_instance_method else args
-        log_input = input_extractor(user_args, kwargs)
+        # For both instance and class methods, use all args for extraction
+        # The extractors need to be able to handle the different formats
+        log_input = input_extractor(args, kwargs)
         dynamic_details = dynamic_llm_details_extractor(kwargs)
 
         error_obj, result, duration = None, None, 0.0
         try:
-            if is_target_instance_method:
-                 result = await original_method(*(args[1:]), **kwargs)
-            else:
-                 result = await original_method(*args, **kwargs)
+            # Call original method with all original args
+            logger.debug(f"Calling original async method {method_name}")
+            result = await original_method(*args, **kwargs)
         except Exception as e:
+            logger.error(f"Error in original async method {method_name}: {e}")
             error_obj = e
         finally:
             duration = time.time() - start_time
+            logger.debug(f"Original async method {method_name} completed in {duration:.2f}s")
 
         log_response = output_extractor(result) if error_obj is None else None
 
@@ -229,14 +244,27 @@ def create_async_wrapper(
             "force_new_conversation": rm_params["force_new_conversation"], # From helper result
         }
 
-        if not hasattr(rm_client, '_alog_trace'):
-            logger.error("RagMetrics: _alog_trace not found, using sync _log_trace.")
-            rm_client._log_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
-        else:
-            await rm_client._alog_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
-
+        logger.info(f"Logging async trace for {method_name}")
+        try:
+            if not hasattr(rm_client, '_alog_trace'):
+                logger.error("RagMetrics: _alog_trace not found, using sync _log_trace.")
+                trace_result = rm_client._log_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
+            else:
+                trace_result = await rm_client._alog_trace(**explicit_trace_args, **final_log_params["passthrough_kwargs"])
+                
+            if trace_result:
+                logger.info(f"Successfully logged async trace for {method_name}")
+            else:
+                logger.warning(f"Failed to log async trace for {method_name}")
+        except Exception as e:
+            logger.error(f"Error logging async trace for {method_name}: {e}", exc_info=True)
+        
         if error_obj:
             raise error_obj
-
+            
         return result
+
+    # Add identifier for debugging
+    wrapper.__wrapped_method__ = method_name
+    wrapper.__ragmetrics_wrapped__ = True
     return wrapper

@@ -12,11 +12,27 @@ from .langchain_wrapper import wrap_langchain_invoke, wrap_langchain_ainvoke
 from .litellm_wrapper import wrap_litellm_completion, wrap_litellm_acompletion
 from .openai_agent_wrapper import wrap_openai_agent_runner_sync, wrap_openai_agent_runner_async
 
-# Helper to safely check for Runner type if openai-agents is optional
+# Import the OpenAI Agents trace processor
 try:
-    from agents import Runner as OpenAIAgentRunner # Alias to avoid name clash if used elsewhere
+    from .openai_agents_trace_processor import register_trace_processor, AGENTS_TRACING_AVAILABLE
 except ImportError:
-    OpenAIAgentRunner = None
+    logger.warning("Failed to import openai_agents_trace_processor, tracing integration will not be available")
+    register_trace_processor = None
+    AGENTS_TRACING_AVAILABLE = False
+
+# Helper to safely check for Runner type if openai-agents is optional
+# Try multiple import paths for better compatibility
+OpenAIAgentRunner = None
+try:
+    from agents import Runner as OpenAIAgentRunner  # First attempt - direct import
+    logger.debug("Successfully imported Runner from agents")
+except ImportError:
+    try:
+        from agents.run import Runner as OpenAIAgentRunner  # Second attempt - from run module
+        logger.debug("Successfully imported Runner from agents.run")
+    except ImportError:
+        logger.debug("OpenAI Agents SDK not available or Runner not found")
+        OpenAIAgentRunner = None
 
 # Helper to safely check for LiteLLM module if optional
 try:
@@ -54,15 +70,26 @@ INTEGRATION_REGISTRY = [
     },
     {
         "name": "OpenAI Agent SDK Runner",
-        # Check if the client is an instance of the openai-agents Runner
-        "client_type_check": lambda client: OpenAIAgentRunner is not None and isinstance(client, OpenAIAgentRunner),
-        "target_object_path": None, # The client instance itself is the target
+        # Check if the client is the Runner class itself (not an instance)
+        "client_type_check": lambda client: OpenAIAgentRunner is not None and (
+            client is OpenAIAgentRunner or  # Direct reference check
+            (hasattr(client, '__name__') and client.__name__ == 'Runner' and  # Class name check
+             (hasattr(client, '__module__') and (
+                 client.__module__ == 'agents' or  # Check from direct import
+                 client.__module__ == 'agents.run' or  # Check from agents.run import
+                 client.__module__.startswith('agents.') # Check for any other agents submodule
+             ))
+            )
+        ),
+        "target_object_path": None, # The class itself is the target
         "methods_to_wrap": {
             "run_sync": wrap_openai_agent_runner_sync,
         },
         "async_methods_to_wrap": {
             "run": wrap_openai_agent_runner_async,
-        }
+        },
+        "is_class_method": True,  # Flag to indicate we're wrapping class methods, not instance methods
+        "register_trace_processor": register_trace_processor  # Function to register the trace processor
     },
     {
         "name": "LangChain Runnable/Client",
@@ -99,10 +126,31 @@ def find_integration(client: Any):
         try:
             if integration["client_type_check"](client):
                 logger.debug(f"RagMetrics: Found matching integration for client: {integration['name']}")
+                
+                # If this is the OpenAI Agents Runner, also register the trace processor
+                if AGENTS_TRACING_AVAILABLE and "register_trace_processor" in integration and integration["register_trace_processor"]:
+                    # Import ragmetrics_client here to avoid circular imports
+                    from ragmetrics.api import ragmetrics_client
+                    logger.info("Registering OpenAI Agents trace processor")
+                    success = integration["register_trace_processor"](ragmetrics_client)
+                    if success:
+                        logger.info("Successfully registered OpenAI Agents trace processor")
+                    else:
+                        logger.warning("Failed to register OpenAI Agents trace processor")
+                
                 return integration
         except Exception as e:
              logger.debug(f"RagMetrics: Error checking integration '{integration['name']}' for client type {type(client).__name__}: {e}")
              continue
+    
+    # Log class info for debugging if no match found
+    if isinstance(client, type):  # If it's a class
+        logger.debug(f"No integration found for class: {client.__name__} from module {client.__module__ if hasattr(client, '__module__') else 'unknown'}")
+    elif hasattr(client, '__class__'):
+        logger.debug(f"No integration found for instance type: {client.__class__.__name__}")
+    else:
+        logger.debug(f"No integration found for object: {type(client).__name__}")
+    
     return None
 
 __all__ = [
@@ -112,5 +160,7 @@ __all__ = [
     "wrap_litellm_completion", "wrap_litellm_acompletion",
     "wrap_openai_agent_runner_sync", "wrap_openai_agent_runner_async",
     "find_integration",
-    "INTEGRATION_REGISTRY"
+    "INTEGRATION_REGISTRY",
+    # OpenAI Agents trace processor
+    "register_trace_processor", "AGENTS_TRACING_AVAILABLE"
 ] 

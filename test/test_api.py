@@ -278,7 +278,7 @@ def test_log_trace_basic_payload(ragmetrics_test_client): # Removed mock_make_re
                 _pos_args, called_kwargs = mock_make_request.call_args # call_args is (args_tuple, kwargs_dict)
                 assert called_kwargs['method'] == 'post'
                 assert called_kwargs['endpoint'] == '/api/client/logtrace/'
-                payload = called_kwargs['json_payload'] 
+                payload = called_kwargs['json'] 
                 assert payload['raw']['input'] == input_msg
                 assert payload['raw']['output'] == response_msg
                 assert isinstance(payload['raw']['id'], str)
@@ -324,7 +324,7 @@ def test_log_trace_force_new_conversation(ragmetrics_test_client): # Removed moc
             else:
                 mock_make_request.assert_called_once()
                 _pos_args, called_kwargs = mock_make_request.call_args 
-                payload = called_kwargs['json_payload'] 
+                payload = called_kwargs['json'] 
                 assert payload['conversation_id'] != original_conv_id
                 assert uuid.UUID(payload['conversation_id'])
                 assert len(client.test_logged_trace_ids) == 1
@@ -359,7 +359,7 @@ def test_log_trace_heuristic_new_conversation(ragmetrics_test_client):
             else:
                 assert mock_make_request.call_count == 1
                 _pos_args, called_kwargs_1 = mock_make_request.call_args_list[0]
-                payload1 = called_kwargs_1['json_payload'] 
+                payload1 = called_kwargs_1['json'] 
                 assert payload1['conversation_id'] == heuristic_conv_id
                 assert heuristic_conv_id != original_conv_id 
                 assert len(client.test_logged_trace_ids) == 1
@@ -378,7 +378,7 @@ def test_log_trace_heuristic_new_conversation(ragmetrics_test_client):
                 )
                 assert mock_make_request.call_count == 2
                 _pos_args, called_kwargs_2 = mock_make_request.call_args_list[1] 
-                payload2 = called_kwargs_2['json_payload'] 
+                payload2 = called_kwargs_2['json'] 
                 assert payload2['conversation_id'] == second_call_conv_id_to_pass
                 assert len(client.test_logged_trace_ids) == 1
                 assert client.test_logged_trace_ids[0] == "mock-trace-id-heuristic-2"
@@ -406,7 +406,7 @@ def test_log_trace_explicit_conversation_id_overrides_heuristic(ragmetrics_test_
             else:
                 mock_make_request.assert_called_once()
                 _pos_args, called_kwargs = mock_make_request.call_args 
-                payload = called_kwargs['json_payload'] 
+                payload = called_kwargs['json'] 
                 assert payload['conversation_id'] == explicit_conv_id
                 assert client.conversation_id != explicit_conv_id
                 assert len(client.test_logged_trace_ids) == 1

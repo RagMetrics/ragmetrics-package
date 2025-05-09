@@ -64,8 +64,11 @@ class ReviewQueue(RagMetricsObject):
     Returns:
             list: List of Trace objects in this review queue.
         """
-        if self._traces is None:
-            self._traces = Trace.list(review_queue_id=self.id) if self.id else []
+        if self.id is None:
+            raise ValueError("Please save this review queue before retrieving traces.")
+        
+        if self._traces in [None, []]:
+            self._traces = self._download_traces(review_queue_id=self.id) if self.id else []
         return self._traces
 
     @traces.setter
@@ -278,3 +281,52 @@ class ReviewQueue(RagMetricsObject):
             iterator: An iterator over the review queue's traces.
         """
         return iter(self.traces)
+    
+    @classmethod
+    def _download_traces(cls, review_queue_id=None):
+        """
+        Retrieve a list of traces associated with a review queue.
+        
+        Args:
+            review_queue_id (int, optional): The ID of the review queue to get traces for.
+            search_term (str, optional): Additional search terms to filter traces.
+            
+        Returns:
+            list: A list of Trace objects matching the criteria.
+            
+        Raises:
+            RagMetricsAPIError: If the API request fails.
+            RagMetricsAuthError: If authentication fails.
+        """
+        from .api import ragmetrics_client, logger
+        from .trace import Trace
+
+        if not ragmetrics_client.access_token:
+            logger.warning("RagMetrics: Not logged in. Cannot retrieve traces. Call login() first.")
+            return []
+
+        if review_queue_id is None:
+            # No filtering criteria provided
+            logger.warning("No review_queue_id or search_term provided for filtering traces")
+            return []            
+            
+        try:
+            # Call the new queue_traces endpoint that wraps get_queue_traces
+            endpoint = "/api/client/trace/queue_traces/"
+            payload = {"review_queue_id": review_queue_id}
+            
+            response = ragmetrics_client._make_request(
+                endpoint=endpoint,
+                method="post",
+                json=payload
+            )
+            
+            if not response or "data" not in response:
+                logger.warning("No traces found or unexpected response format")
+                return []
+            
+            return [Trace.from_dict(td) for td in response["data"]]
+                
+        except Exception as e:
+            logger.error(f"Error retrieving traces: {e}")
+            return []    

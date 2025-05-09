@@ -676,17 +676,12 @@ class Experiment:
     Raises:
             Exception: If the API call fails.
         """
-        headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
         response = ragmetrics_client._make_request(
             method="post",
             endpoint="/api/client/experiment/run/",
-            json=payload,
-            headers=headers
+            json=payload
         )
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception("Failed to run experiment: " + response.text)
+        return response
 
     def run_async(self):
         """

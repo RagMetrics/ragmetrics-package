@@ -98,3 +98,4 @@ class Trace(RagMetricsObject):
         trace = cls(**data)
         trace.edit_mode = False
         return trace
+        
