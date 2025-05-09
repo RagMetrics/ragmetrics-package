@@ -55,6 +55,26 @@ class RagMetricsAPIError(RagMetricsError):
         if self.response_text: s += f" Response: {self.response_text[:200]}..." 
         return s
 
+def serialize_default(o):
+    """Safe serializer for common non-serializable types."""
+    if hasattr(o, "model_dump") and callable(o.model_dump):
+        try: return o.model_dump()
+        except Exception: pass # Fallback if model_dump fails
+    if hasattr(o, "dict") and callable(o.dict):
+        try: return o.dict()
+        except Exception: pass # Fallback if dict fails
+    if isinstance(o, uuid.UUID) or type(o).__name__ == 'datetime': 
+        return str(o)
+    if isinstance(o, time.struct_time): 
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", o)
+    if isinstance(o, Exception):
+        return str(o) # Serialize exceptions as strings
+    # For any other type, return its string representation
+    try: 
+        return repr(o) # Use repr for potentially more info than str
+    except Exception:
+        return f"<unserializable:{type(o).__name__}>"
+
 class RagMetricsClient:
     """
     Client for interacting with the RagMetrics API.
@@ -81,6 +101,7 @@ class RagMetricsClient:
         self.logging_off: bool = False
         self.metadata: Optional[dict] = None 
         self.conversation_id: str = str(uuid.uuid4())
+        self.test_logged_trace_ids: List[str] = [] # For capturing trace IDs during tests
         logger.info(f"RagMetricsClient initialized. Default Base URL: {self.base_url}")
     
     def new_conversation(self, id: Optional[str] = None):
@@ -251,39 +272,17 @@ class RagMetricsClient:
         if kwargs:
             payload.update(kwargs)
 
-        try:
-            def serialize_default(o):
-                if hasattr(o, "model_dump_json") and callable(o.model_dump_json): 
-                    try: return json.loads(o.model_dump_json())
-                    except: return o.model_dump_json() 
-                if hasattr(o, "model_dump") and callable(o.model_dump): return o.model_dump()
-                if hasattr(o, "dict") and callable(o.dict): return o.dict()
-                if isinstance(o, uuid.UUID) or type(o).__name__ == 'datetime': return str(o)
-                if isinstance(o, time.struct_time): return time.strftime("%Y-%m-%dT%H:%M:%SZ", o)
-                if isinstance(o, Exception): return str(o) # Serialize exceptions
-                try: return str(o)
-                except: return f"<unserializable:{type(o).__name__}>"
-            payload_final = json.loads(json.dumps(payload, indent=4, default=serialize_default))
-        except Exception as e: # Catch broader exceptions during the complex serialization
-            logger.error(f"RagMetrics: Error serializing payload to JSON: {e}. Payload (first 500 chars): {str(payload)[:500]}")
-            return None 
+        # Make the API call to log the trace
+        # Corrected Endpoint:
+        response_data = self._make_request(endpoint="/api/client/logtrace/", method="post", json_payload=payload) 
 
-        log_resp = self._make_request(
-            method='post',
-            endpoint='/api/client/logtrace/',
-            json=payload_final,
-            headers={
-                "Authorization": f"Token {self.access_token}",
-                "Content-Type": "application/json"
-            }
-        )
-
-        if log_resp and log_resp.status_code >= 400:
-             logger.warning(f"RagMetrics: API returned error on log trace: {log_resp.status_code} - {log_resp.text[:200]}") # Limit response text
-        elif log_resp:
-             logger.debug(f"RagMetrics: Trace logged successfully (Conv ID: {current_trace_conversation_id}).")
-             
-        return log_resp
+        if response_data and isinstance(response_data, dict):
+            trace_id = response_data.get("id") 
+            if trace_id and hasattr(self, 'test_logged_trace_ids'):
+                self.test_logged_trace_ids.append(str(trace_id))
+            return response_data 
+        
+        return None
 
     async def _alog_trace(
         self,
@@ -329,88 +328,152 @@ class RagMetricsClient:
         """
         if off:
             self.logging_off = True
-            self.access_token = None
+            self.access_token = None 
             logger.info("RagMetrics: Logging explicitly disabled.")
             return True
         
-        self.logging_off = False # Ensure logging is enabled if off=False
+        self.logging_off = False
 
-        # Determine API key: Arg > Env Var
         api_key_to_use = key or os.environ.get('RAGMETRICS_API_KEY')
         if not api_key_to_use:
-            self.logging_off = True # Disable logging
+            self.logging_off = True 
             raise RagMetricsConfigError("Missing API key. Provide key to login() or set RAGMETRICS_API_KEY environment variable.")
 
-        # Determine base URL: Arg > Env Var > Current/Default
         base_url_to_use = base_url or os.environ.get('RAGMETRICS_BASE_URL', self.base_url) 
-        self.base_url = base_url_to_use # Update client's base_url
+        self.base_url = base_url_to_use
+        self.access_token = None
 
         try:
-            logger.info(f"RagMetrics: Attempting login to {self.base_url}...")
-            response = self._make_request(method='post', endpoint='/api/client/login/', json={"key": api_key_to_use})
+            logger.info(f"RagMetrics: Validating API key via {self.base_url}/api/client/login/...")
+            login_payload = {"key": api_key_to_use}
+            # Call login endpoint purely to validate the key
+            response_data = self._make_request(method='post', endpoint='/api/client/login/', json_payload=login_payload)
             
-            if response is None: # _make_request failed (e.g., network error)
-                 raise RagMetricsAPIError("Login request failed. Check network connectivity or base URL.")
+            # Check if validation call itself failed (e.g., 4xx/5xx covered by _make_request exceptions)
+            # or returned unexpected non-dict data
+            if response_data is None or not isinstance(response_data, dict):
+                 logger.error(f"RagMetrics: API key validation via login endpoint failed or returned unexpected data: {response_data}")
+                 # Raise specific error from _make_request if it didn't already
+                 raise RagMetricsAPIError(f"API key validation failed. Response: {response_data}")
             
-            if response.status_code in [401, 403]:
-                 raise RagMetricsAuthError(f"Authentication failed (Status: {response.status_code}). Check API key.", status_code=response.status_code, response_text=response.text)
+            logger.info(f"RagMetrics: API key successfully validated via login endpoint. Response: {response_data}")
             
-            response.raise_for_status() # Raise HTTPError for other bad responses (4xx client error, 5xx server error)
+            # --- Key Change: Assume API Key IS the Token --- 
+            # Since the login endpoint doesn't return a session token, we will now
+            # assume the API key itself is used directly for Token Authentication.
+            self.access_token = api_key_to_use 
+            logger.info(f"RagMetrics: Using provided API key as the authentication token for subsequent requests.")
+            # ----------------------------------------------
 
-            # Success
-            self.access_token = api_key_to_use
             self.new_conversation() 
-            logger.info(f"RagMetrics: Successfully logged in. Base URL: {self.base_url}")
             return True
 
-        except requests.exceptions.HTTPError as e:
-            # Handle non-auth HTTP errors specifically
-            logger.error(f"RagMetrics: Login request failed. HTTP Error {e.response.status_code} for {e.request.url}. Response: {e.response.text}")
+        except (RagMetricsAuthError, RagMetricsAPIError) as e:
+            # Handle validation failure (e.g., 401/403 from /api/client/login/)
+            logger.error(f"RagMetrics: API key validation failed: {e}")
             self.access_token = None
             self.logging_off = True
-            raise RagMetricsAPIError(f"Login request failed (Status: {e.response.status_code}).", status_code=e.response.status_code, response_text=e.response.text) from e
-        except RagMetricsError: # Re-raise our custom errors
-             self.access_token = None
-             self.logging_off = True
-             raise
+            raise # Re-raise the specific error
         except Exception as e:
-            # Catch any other unexpected errors during login
-            logger.error(f"RagMetrics: An unexpected error occurred during login: {e}", exc_info=True)
+            logger.error(f"RagMetrics: An unexpected error occurred during API key validation: {e}", exc_info=True)
             self.access_token = None
             self.logging_off = True
-            raise RagMetricsError(f"An unexpected error occurred during login: {e}") from e
+            raise RagMetricsError(f"An unexpected error occurred during API key validation: {e}") from e
 
-    def _make_request(self, endpoint: str, method: str ="post", **kwargs) -> Optional[requests.Response]:
-        """Internal method to make API requests, handling common errors."""
-        if not self.access_token and "/api/client/login/" not in endpoint: # Allow login requests without token
-             logger.error("RagMetrics: Attempted API call without access token. Please login first.")
-             return None # Cannot make request without token (except login)
-             
+    def _make_request(self, endpoint: str, method: str ="post", json_payload: Optional[dict] = None, data: Optional[Any] = None, params: Optional[dict] = None, **kwargs) -> Optional[Any]:
+        """Internal helper to make authenticated requests to the RagMetrics API."""
+        
         url = f"{self.base_url.rstrip('/')}{endpoint}"
-        response = None
+        headers = {
+            # Default Content-Type set below based on payload type
+            "Accept": "application/json"
+        }
+
+        # Determine if auth token should be sent and how
+        send_auth_header = True
+        auth_header_value = None
+
+        if endpoint == '/api/client/login/': 
+            send_auth_header = False # Don't send auth for the login attempt itself
+            if json_payload and 'key' in json_payload: 
+                 headers["Content-Type"] = "application/json"
+        else:
+            # For all other endpoints, use DRF Token authentication
+            if not self.access_token:
+                logger.warning(f"RagMetrics: No access token for authenticated endpoint {endpoint}. Request may fail.")
+                # Allow request to proceed, server will likely reject with 401/403
+                send_auth_header = False 
+            else:
+                # Use "Token <token_key>" format for DRF TokenAuthentication
+                auth_header_value = f"Token {self.access_token}" 
+        
+        if send_auth_header and auth_header_value:
+            headers["Authorization"] = auth_header_value
+        elif "Authorization" in headers:
+             # Defensive: Ensure no old/incorrect Authorization header is present if not sending
+             del headers["Authorization"] 
+
+        # Prepare data and Content-Type for POST/PUT etc.
+        body_data = None
+        if method.lower() in ["post", "put", "patch"]:
+            if json_payload is not None:
+                headers["Content-Type"] = "application/json"
+                try:
+                    body_data = json.dumps(json_payload, default=serialize_default)
+                except Exception as e:
+                    logger.error(f"RagMetrics: Failed to serialize json_payload for {endpoint}: {e}", exc_info=True)
+                    raise RagMetricsError(f"Failed to serialize JSON payload: {e}") from e
+            elif data is not None:
+                if "Content-Type" not in headers:
+                     headers["Content-Type"] = "application/x-www-form-urlencoded" # Assume form data if not JSON
+                body_data = data
+            # If neither json_payload nor data, body is None, Content-Type might not be needed or set elsewhere
+
         try:
-            kwargs.setdefault('timeout', 15)
-            logger.debug(f"RagMetrics: Sending {method.upper()} request to {url} with timeout {kwargs['timeout']}s")
-            response = requests.request(method, url, **kwargs) 
-            # Check for API-level errors even if HTTP status is 2xx but response indicates issue
-            # (This depends on API contract, but good practice to check)
-            # if response.status_code < 400 and response.content and "error" in response.text.lower():
-            #     logger.warning(f"RagMetrics: API request to {url} succeeded (HTTP {response.status_code}) but response contains potential error: {response.text[:200]}")
-
-        except requests.exceptions.Timeout:
-            logger.error(f"RagMetrics: Request to {url} timed out after {kwargs['timeout']} seconds.")
-            # Return None, let caller handle timeout
-        except requests.exceptions.ConnectionError as e:
-             logger.error(f"RagMetrics: Connection error for {url}. Check network or base URL. Error: {e}")
+            logger.debug(f"RagMetrics: Making {method.upper()} request to {url} with headers: {headers}")
+            
+            if method.lower() == "post":
+                response = requests.post(url, headers=headers, data=body_data, params=params) # Pass params even for POST if needed
+            elif method.lower() == "get":
+                response = requests.get(url, headers=headers, params=params)
+            elif method.lower() == "put":
+                response = requests.put(url, headers=headers, data=body_data, params=params)
+            elif method.lower() == "patch":
+                response = requests.patch(url, headers=headers, data=body_data, params=params)
+            elif method.lower() == "delete":
+                response = requests.delete(url, headers=headers, params=params)
+            else:
+                logger.error(f"RagMetrics: Unsupported HTTP method '{method}'")
+                return None
+            
+            logger.debug(f"RagMetrics: Response status {response.status_code}, content: {response.text[:200]}...")
+            response.raise_for_status() 
+            
+            if response.text:
+                try:
+                    return response.json()
+                except json.JSONDecodeError:
+                    logger.warning(f"RagMetrics: Could not decode JSON from response for {method.upper()} {url}. Response text: {response.text[:200]}...")
+                    return response.text
+            return None
+        
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401 or e.response.status_code == 403:
+                raise RagMetricsAuthError(
+                    f"Authentication error for {method.upper()} {url}: {e.response.status_code} - {e.response.text[:200]}...",
+                    status_code=e.response.status_code,
+                    response_text=e.response.text
+                ) from e
+            else:
+                raise RagMetricsAPIError(
+                    f"API error for {method.upper()} {url}: {e.response.status_code} - {e.response.text[:200]}...",
+                    status_code=e.response.status_code,
+                    response_text=e.response.text
+                ) from e
         except requests.exceptions.RequestException as e:
-            logger.error(f"RagMetrics: Request to {url} failed: {e}")
-            # Log specific HTTP errors if available in the exception context
-            if e.response is not None:
-                 logger.error(f"RagMetrics: Status Code: {e.response.status_code}, Response: {e.response.text[:200]}")
-        except Exception as e:
-             logger.error(f"RagMetrics: Unexpected error during request to {url}: {e}", exc_info=True)
-
-        return response # Return the response object (or None on critical failure)
+            logger.error(f"RagMetrics: Request failed for {method.upper()} {url}: {e}")
+            raise RagMetricsError(f"Request failed: {e}") from e
+        # Removed final `return None` as exceptions should cover failures
 
     def monitor(self, client: Any, metadata: Optional[dict] = None, callback: Optional[Callable[[Any, Any], dict]] = None) -> Any:
         """
@@ -567,72 +630,124 @@ class RagMetricsObject:
 
     
     Returns:
-            Response: The API response from saving the object.
+            Response: The API response from saving the object. (Note: _make_request returns parsed data or raises)
             
     
     Raises:
             ValueError: If object_type is not defined.
-            Exception: If the API request fails.
+            RagMetricsAPIError: If the API request fails.
+            RagMetricsAuthError: If authentication fails.
+            RagMetricsError: For other client-side issues (e.g. serialization).
         """
         if not self.object_type:
             raise ValueError("object_type must be defined.")
-        payload = self.to_dict()
-        # e.g. /api/client/task/save/ or /api/client/dataset/save/
+        
+        try:
+            payload = self.to_dict()
+        except Exception as e:
+            logger.error(f"Error serializing {self.object_type} for save: {e}", exc_info=True)
+            raise RagMetricsError(f"Error during serialization for save: {e}") from e
+
         endpoint = f"/api/client/{self.object_type}/save/"
-        headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
-        response = ragmetrics_client._make_request(
-            method="post", endpoint=endpoint, json=payload, headers=headers
-        )
-        if response.status_code == 200:
-            json_resp = response.json()
-            self.id = json_resp.get(self.object_type, {}).get("id")
-        else:
-            raise Exception(f"Failed to save {self.object_type}: {response.text}")
+        
+        try:
+            response_data = ragmetrics_client._make_request(
+                method="post", 
+                endpoint=endpoint, 
+                json_payload=payload # USE json_payload (corrected from 'json')
+            )
+
+            if isinstance(response_data, dict):
+                new_id = None
+                if "id" in response_data:
+                    new_id = response_data.get("id")
+                elif self.object_type in response_data and isinstance(response_data[self.object_type], dict):
+                    new_id = response_data[self.object_type].get("id")
+                
+                if new_id:
+                    self.id = new_id
+                    logger.info(f"{self.object_type} saved successfully with ID: {self.id}")
+                    return self 
+                else:
+                    logger.error(f"Saved {self.object_type} but no ID was found in response: {response_data}")
+                    raise RagMetricsAPIError(f"Save successful for {self.object_type} but no ID returned.", response_text=str(response_data))
+            else:
+                logger.error(f"Unexpected response type from _make_request during save: {type(response_data)}. Response: {str(response_data)[:200]}")
+                raise RagMetricsAPIError(f"Save failed for {self.object_type}: Unexpected response structure.", response_text=str(response_data))
+        
+        except (RagMetricsAPIError, RagMetricsAuthError, RagMetricsError) as e:
+            logger.error(f"Failed to save {self.object_type}: {e}")
+            raise
+        except Exception as e:
+            logger.exception(f"Unexpected error during save of {self.object_type}: {e}")
+            raise RagMetricsError(f"An unexpected error occurred while saving {self.object_type}: {e}") from e
 
     @classmethod
     def download(cls, id=None, name=None):
         """
-        Download an object from the RagMetrics API.
-        
-        This method retrieves an object from the RagMetrics API by its ID or name.
-
-    
-    Args:
-            id: ID of the object to download (mutually exclusive with name).
-            name: Name of the object to download (mutually exclusive with id).
-
-    
-    Returns:
-            RagMetricsObject: The downloaded object instance.
-            
-    
-    Raises:
-            ValueError: If neither id nor name is provided, or if object_type is not defined.
-            Exception: If the API request fails.
+        Download an object from the RagMetrics API by ID or name using the /api/client endpoint.
+        Uses ragmetrics_client._make_request with Bearer token authentication.
         """
+        # Import client and exceptions here to avoid potential circular dependencies at module level
+        from .api import ragmetrics_client, logger, RagMetricsAPIError, RagMetricsAuthError 
+        
+        if not ragmetrics_client.access_token:
+            raise RagMetricsAuthError("RagMetrics client not authenticated. Please login first.")
         if not cls.object_type:
-            raise ValueError("object_type must be defined.")
+            raise ValueError(f"object_type must be defined for class {cls.__name__} to download.")
         if id is None and name is None:
-            raise ValueError("Either id or name must be provided.")
-        
+            raise ValueError("Either id or name must be provided for download.")
+        if id is not None and name is not None:
+             logger.warning("Both id and name provided to download. Using id.")
+             name = None # Prioritize ID if both are given
+
+        # Construct endpoint and query parameters
+        endpoint = f"/api/client/{cls.object_type}/download/"
+        params = {}
         if id is not None:
-            endpoint = f"/api/client/{cls.object_type}/download/?id={id}"
-        else:
-            endpoint = f"/api/client/{cls.object_type}/download/?name={name}"
+            params['id'] = id
+        else: # name must be not None here
+            params['name'] = name
         
-        headers = {"Authorization": f"Token {ragmetrics_client.access_token}"}
-        response = ragmetrics_client._make_request(
-            method="get", endpoint=endpoint, headers=headers
-        )
-        if response.status_code == 200:
-            json_resp = response.json()
-            obj_data = json_resp.get(cls.object_type, {})
-            obj = cls.from_dict(obj_data)
-            obj.id = obj_data.get("id")
-            return obj
-        else:
-            raise Exception(f"Failed to download {cls.object_type}: {response.text}")
-        
+        try:
+            # Use _make_request (which handles Bearer token)
+            response_data = ragmetrics_client._make_request(
+                method="get", endpoint=endpoint, params=params
+            )
+
+            if isinstance(response_data, dict):
+                # API might return object nested under its type key or directly
+                obj_data = response_data
+                if cls.object_type in response_data and isinstance(response_data[cls.object_type], dict):
+                    obj_data = response_data[cls.object_type]
+                
+                if not obj_data: # Handle empty response or unexpected structure
+                    logger.error(f"No valid '{cls.object_type}' data found in download response for id={id}/name={name}. Response: {response_data}")
+                    return None
+                    
+                obj = cls.from_dict(obj_data)
+                # Ensure ID is set from the response data
+                downloaded_id = obj_data.get("id")
+                if downloaded_id:
+                    obj.id = downloaded_id
+                elif id is not None: # Fallback to the requested ID if not in response
+                     obj.id = id
+                return obj
+            else:
+                logger.error(f"Failed to get valid dict data for {cls.object_type} id={id}/name={name}. Response type: {type(response_data)}, Response: {str(response_data)[:200]}...")
+                return None
+        except RagMetricsAPIError as e:
+            logger.error(f"API error while downloading {cls.object_type} id={id}/name={name}: {e}")
+            # Optional: could return None instead of raising, depending on desired strictness
+            raise # Re-raise API errors for clarity
+        except RagMetricsAuthError as e:
+            logger.error(f"Auth error while downloading {cls.object_type} id={id}/name={name}: {e}")
+            raise # Re-raise auth errors
+        except Exception as e:
+            # Catch unexpected errors during download/parsing
+            logger.exception(f"Unexpected error during download of {cls.object_type} id={id}/name={name}: {e}")
+            raise RagMetricsError(f"Unexpected error during download: {e}") from e
+
 # Global client instance
 ragmetrics_client = RagMetricsClient()
 

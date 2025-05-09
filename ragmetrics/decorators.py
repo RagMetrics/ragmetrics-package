@@ -93,7 +93,8 @@ def trace_function_call(func: Callable) -> Callable:
             expected=None, 
             duration=duration,
             tools=None,  
-            callback_result=callback_payload
+            callback_result=callback_payload,
+            conversation_id=ragmetrics_client.conversation_id
         )
         return result
 

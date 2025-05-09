@@ -1,4 +1,4 @@
-from .api import RagMetricsObject
+from .api import RagMetricsObject, ragmetrics_client, logger, RagMetricsError
 
 class Trace(RagMetricsObject):
     """
@@ -11,7 +11,7 @@ class Trace(RagMetricsObject):
     
     object_type = "trace"  
 
-    def __init__(self, id=None, created_at=None, input=None, output=None, raw_input=None, raw_output=None, contexts=None, metadata=None):
+    def __init__(self, id=None, created_at=None, input=None, output=None, raw_input=None, raw_output=None, contexts=None, metadata=None, conversation_id=None, **kwargs):
         """
         Initialize a new Trace instance.
 
@@ -25,7 +25,10 @@ class Trace(RagMetricsObject):
             raw_output (dict, optional): The raw output data received from the LLM.
             contexts (list, optional): List of context information provided during the interaction.
             metadata (dict, optional): Additional metadata about the interaction.
+            conversation_id (str, optional): The conversation ID this trace belongs to.
+            **kwargs: Additional attributes not explicitly defined.
         """
+        super().__init__()
         self.id = id
         self.created_at = created_at
         self.input = input
@@ -34,7 +37,12 @@ class Trace(RagMetricsObject):
         self.raw_output = raw_output
         self.contexts = contexts
         self.metadata = metadata
+        self.conversation_id = conversation_id
         self.edit_mode = False
+
+        for key, value in kwargs.items():
+            if not hasattr(self, key):
+                setattr(self, key, value)
 
     def __setattr__(self, key, value):
         """
@@ -48,8 +56,6 @@ class Trace(RagMetricsObject):
             key (str): The attribute name.
             value: The value to set.
         """
-        # Automatically enable edit mode when any attribute except 'edit_mode' is changed,
-        # and if id is already set (i.e. an existing trace is being modified).
         if key not in {"edit_mode"} and hasattr(self, "id") and self.id is not None:
             object.__setattr__(self, "edit_mode", True)
         object.__setattr__(self, key, value)
@@ -72,6 +78,7 @@ class Trace(RagMetricsObject):
             "raw_output": self.raw_output,
             "contexts": self.contexts,
             "metadata": self.metadata,
+            "conversation_id": self.conversation_id,
             "edit": self.edit_mode,
         }
 
@@ -88,15 +95,6 @@ class Trace(RagMetricsObject):
     Returns:
             Trace: A new Trace instance initialized with the provided data.
         """
-        trace = cls(
-            id=data.get("id"),
-            created_at=data.get("created_at"),
-            input=data.get("input"),
-            output=data.get("output"),
-            raw_input=data.get("raw_input"),
-            raw_output=data.get("raw_output"),
-            contexts=data.get("contexts"),
-            metadata=data.get("metadata")
-        )
+        trace = cls(**data)
         trace.edit_mode = False
         return trace

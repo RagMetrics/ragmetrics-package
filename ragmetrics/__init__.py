@@ -26,14 +26,15 @@ Core API Functions:
 * **Trace**: Access and manipulate logged interactions, including inputs, outputs, and metadata
 """
 
-from .api import RagMetricsClient, ragmetrics_client, login, monitor
+from .api import RagMetricsClient, ragmetrics_client, login, monitor, RagMetricsObject
 from .decorators import trace_function_call
-from .models import RagMetricsObject
 from .dataset import Dataset, Example
 from .tasks import Task
 from .utils import default_input, default_output, default_callback
 from .experiments import Experiment, Cohort
 from .criteria import Criteria
+from .reviews import ReviewQueue
+from .trace import Trace
 
 __all__ = [
     "RagMetricsClient",
@@ -51,4 +52,6 @@ __all__ = [
     "Experiment",
     "Cohort",
     "Criteria",
+    "ReviewQueue",
+    "Trace",
 ]

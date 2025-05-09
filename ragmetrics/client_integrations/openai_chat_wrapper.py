@@ -1,12 +1,35 @@
 import time
 import types
-from typing import Callable, Any, Optional, Dict, Tuple
+from typing import Callable, Any, Optional, Dict, Tuple, List
 import logging
 import inspect
 from ragmetrics.utils import default_output
 from .wrapper_utils import create_sync_wrapper, create_async_wrapper
 
 logger = logging.getLogger(__name__)
+
+def _extract_openai_call_details(kwargs: Dict[str, Any]) -> Tuple[Optional[List[Any]], Optional[Any], Dict[str, Any], Dict[str, Any]]:
+    """Extracts RagMetrics-specific args and prepares kwargs for the actual LLM call.
+    Gathers user-supplied metadata and specific OpenAI params (tools, tool_choice) for logging.
+    """
+    llm_call_kwargs = kwargs.copy() # Work on a copy
+
+    contexts = llm_call_kwargs.pop("contexts", None)
+    expected = llm_call_kwargs.pop("expected", None)
+    user_call_metadata = llm_call_kwargs.pop("metadata", None) 
+
+    additional_llm_metadata = {}
+    if isinstance(user_call_metadata, dict):
+        additional_llm_metadata.update(user_call_metadata)
+    
+    # Only add 'tools' and 'tool_choice' from the llm_call_kwargs to additional_llm_metadata
+    # Other llm params (model, temp, etc.) are handled by _openai_chat_dynamic_llm_details_extractor for top-level fields.
+    if "tools" in llm_call_kwargs:
+        additional_llm_metadata["tools"] = llm_call_kwargs["tools"]
+    if "tool_choice" in llm_call_kwargs:
+        additional_llm_metadata["tool_choice"] = llm_call_kwargs["tool_choice"]
+            
+    return contexts, expected, llm_call_kwargs, additional_llm_metadata
 
 def _openai_chat_input_extractor(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any:
     """Extracts the 'messages' payload from OpenAI chat completion kwargs."""

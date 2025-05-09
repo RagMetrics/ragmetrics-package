@@ -24,19 +24,33 @@ try:
 except ImportError:
     litellm = None
 
+# Helper to safely import OpenAI and AsyncOpenAI from openai package v1.0+
+try:
+    from openai import OpenAI, AsyncOpenAI
+except ImportError:
+    OpenAI = None
+    AsyncOpenAI = None
+
 INTEGRATION_REGISTRY = [
     {
-        "name": "OpenAI API Client (Chat Completions)",
-        # Checks if it's a modern OpenAI client (sync or async) that has chat.completions
-        "client_type_check": lambda client: hasattr(client, "chat") and hasattr(client.chat, "completions"),
-        "target_object_path": "chat.completions", # Path to client.chat.completions
-        # async_target_object_path is the same as target_object_path for OpenAI v1.x SDK
+        "name": "OpenAI API Client (SYNC Chat Completions)",
+        "client_type_check": lambda client: OpenAI is not None and isinstance(client, OpenAI) and \
+                                         hasattr(client, "chat") and hasattr(client.chat, "completions"),
+        "target_object_path": "chat.completions",
         "methods_to_wrap": {
             "create": wrap_openai_chat_completions_create,
         },
+        # No async_methods_to_wrap for the purely sync client
+    },
+    {
+        "name": "OpenAI API Client (ASYNC Chat Completions)",
+        "client_type_check": lambda client: AsyncOpenAI is not None and isinstance(client, AsyncOpenAI) and \
+                                         hasattr(client, "chat") and hasattr(client.chat, "completions"),
+        "target_object_path": "chat.completions", # client.chat.completions will be AsyncCompletions
         "async_methods_to_wrap": {
             "create": wrap_openai_chat_completions_acreate,
         }
+        # No methods_to_wrap for 'create' as we are targeting the async 'create'
     },
     {
         "name": "OpenAI Agent SDK Runner",
