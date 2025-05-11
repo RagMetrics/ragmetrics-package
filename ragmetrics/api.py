@@ -303,7 +303,6 @@ class RagMetricsClient:
             contexts=None,
             expected=None,
             duration=None, 
-            tools=None, 
             callback_result=None,
             **kwargs
         ):
@@ -373,7 +372,7 @@ class RagMetricsClient:
             "metadata": union_metadata,
             "contexts": contexts,
             "expected": expected,
-            "tools": tools,
+            "tools": kwargs.get('tools', None),
             "input": None,
             "output": None,
             "scores": None,
@@ -460,53 +459,167 @@ class RagMetricsClient:
             return True
         raise ValueError("Invalid access token. Please get a new one at RagMetrics.ai.")
 
-    def _original_llm_invoke(self, client):
+    def _detect_client_type(self, client):
         """
-        Get the original LLM invocation function from a client object.
+        Detect the type of LLM client.
         
-        Used internally to identify the correct function to wrap when monitoring
-        various types of LLM clients.
-
-    
-    Args:
-            client: The LLM client object to analyze.
-
-    
-    Returns:
-            Callable: The original LLM invocation function.
+        Args:
+            client: The client to detect type for
             
-    
-    Raises:
-            ValueError: If the client type is not supported.
+        Returns:
+            tuple: (client_type, invoke_method)
+                - client_type is one of: 'openai', 'invoke', 'lite'
+                - invoke_method is the original method to call
+                
+        Raises:
+            ValueError: If client type is not supported
         """
+        # OpenAI-style clients
         if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
-            return type(client.chat.completions).create
-        elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
-            return getattr(client, "invoke")
-        elif hasattr(client, "completion"):
-            return client.completion
-        else:
-            raise ValueError("Unsupported client")
-
-    def _make_request(self, endpoint, method="post", **kwargs):
-        """
-        Make an HTTP request to the RagMetrics API.
+            return 'openai', type(client.chat.completions).create
         
-        Used internally by various methods to communicate with the RagMetrics API.
-
+        # LangChain-style clients with invoke method
+        elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
+            return 'invoke', getattr(client, "invoke")
+        
+        # LiteLLM-style clients
+        elif hasattr(client, "completion"):
+            return 'completion', client.completion
+        
+        else:
+            raise ValueError("Unsupported client type")
     
-    Args:
-            endpoint: The API endpoint to call (e.g., "/api/client/login/").
-            method: The HTTP method to use (default: "post").
-            **kwargs: Additional arguments to pass to the requests library.
-
-    
-    Returns:
-            Response: The HTTP response from the API.
+    def _get_input_from_client_call(self, client_type, args, kwargs):
         """
-        url = f"{self.base_url}{endpoint}"
-        response = requests.request(method, url, **kwargs)
+        Extract input messages from client-specific call patterns.
+        
+        Args:
+            client_type: Type of client ('openai', 'invoke', or 'completion')
+            args: Positional arguments passed to the client call
+            kwargs: Keyword arguments passed to the client call
+            
+        Returns:
+            The input messages in the appropriate format for the client type
+        """
+        if client_type == 'openai':
+            return kwargs.get('messages')
+        elif client_type == 'invoke':
+            input_messages = kwargs.get('input')
+            if input_messages is None and len(args) > 1:
+                input_messages = args[1]
+            return input_messages
+        elif client_type == 'completion':
+            return kwargs.get('messages')
+        return None
+
+    def _apply_client_wrapper(self, client, client_type, orig_invoke, wrapper_func):
+        """
+        Apply the wrapper function to the appropriate method of the client.
+        
+        Args:
+            client: The client to wrap
+            client_type: Type of client ('openai', 'invoke', or 'completion')
+            orig_invoke: Original invoke method
+            wrapper_func: The wrapper function to apply
+            
+        Returns:
+            The modified client
+        """
+        if client_type == 'openai':
+            client.chat.completions.create = types.MethodType(wrapper_func, client.chat.completions)
+        elif client_type == 'invoke':
+            if isinstance(client, type):
+                setattr(client, "invoke", wrapper_func)
+            else:
+                client.invoke = types.MethodType(wrapper_func, client)
+        elif client_type == 'completion':
+            client.completion = wrapper_func
+        return client
+
+    def _unified_wrapper(self, client_type, orig_invoke, callback, *args, **kwargs):
+        """
+        Unified wrapper method for all types of LLM API calls.
+        
+        Args:
+            client_type: The type of wrapper ('openai', 'invoke', or 'completion')
+            orig_invoke: The original method being wrapped
+            callback: The callback function to process results
+            *args: Positional arguments to the original method
+            **kwargs: Keyword arguments to the original method
+            
+        Returns:
+            The response from the original method
+        """
+
+        # Extract and save metadata fields from kwargs for logging
+        # but don't remove 'tools' from kwargs as it's needed for API calls
+        if client_type == 'litellm':
+            # litellm also accepts a metadata argument
+            metadata_llm = kwargs.get('metadata', None)
+        else:
+            metadata_llm = kwargs.pop('metadata', None)
+
+        contexts = kwargs.pop('contexts', None)
+        expected = kwargs.pop('expected', None)
+        
+        # # Save tools for logging but don't remove from kwargs
+        # tools = kwargs.get('tools')
+        # metadata_fields['tools'] = tools
+        
+        start_time = time.time()
+        
+        # Execute client-specific invocation logic
+        if client_type == 'openai':
+            client, self_instance, *invoke_args = args
+            response = orig_invoke(self_instance, *invoke_args, **kwargs)
+        else:
+            response = orig_invoke(*args, **kwargs)
+            
+        # Get input in a client-specific way
+        input_messages = self._get_input_from_client_call(client_type, args, kwargs)
+            
+        # Process and log the interaction
+        duration = time.time() - start_time
+        cb_result = callback(input_messages, response)
+        
+        # Create a copy of kwargs without 'tools' to avoid duplicate argument error
+        # log_kwargs = kwargs.copy()
+        # if 'tools' in log_kwargs:
+        #     del log_kwargs['tools']
+        
+        self._log_trace(
+            input_messages=input_messages,
+            response=response,
+            duration=duration,
+            callback_result=cb_result,
+            metadata_llm=metadata_llm,
+            contexts=contexts,
+            expected=expected,
+            **kwargs
+        )
         return response
+    
+    def _generate_wrapper(self, client_type, orig_invoke, callback, client=None):
+        """
+        Create a wrapper function for various LLM client types.
+        
+        Args:
+            client_type: Type of wrapper to generate ('openai', 'invoke', or 'completion')
+            orig_invoke: Original method being wrapped
+            callback: Callback function to process results
+            client: Client object (required for OpenAI wrappers)
+            
+        Returns:
+            A wrapper function for the specified client type
+        """
+        if client_type == 'openai':
+            return lambda self_instance, *args, **kwargs: self._unified_wrapper(
+                client_type, orig_invoke, callback, client, self_instance, *args, **kwargs
+            )
+        else:
+            return lambda *args, **kwargs: self._unified_wrapper(
+                client_type, orig_invoke, callback, *args, **kwargs
+            )
 
     def monitor(self, client, metadata, callback: Optional[Callable[[Any, Any], dict]] = None):
         """
@@ -547,92 +660,60 @@ class RagMetricsClient:
         if callback is None:
             callback = default_callback
 
-        orig_invoke = self._original_llm_invoke(client)
+        # Detect client type and get original invoke method
+        client_type, orig_invoke = self._detect_client_type(client)
+        
+        # Generate appropriate wrapper based on client type
+        wrapper_func = self._generate_wrapper(client_type, orig_invoke, callback, client)
+        
+        # Apply the wrapper to the client
+        self._apply_client_wrapper(client, client_type, orig_invoke, wrapper_func)
+        
+        return client
 
-        # Chat-based clients (OpenAI)
-        if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
-            def openai_wrapper(self_instance, *args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None)
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(self_instance, *args, **kwargs)
-                duration = time.time() - start_time
-                input_messages = kwargs.get('messages')
-                cb_result = callback(input_messages, response)
-                tools = kwargs.pop('tools', None)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration,
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            client.chat.completions.create = types.MethodType(openai_wrapper, client.chat.completions)
+    def _original_llm_invoke(self, client):
+        """
+        Get the original LLM invocation function from a client object.
         
-        # LangChain-style clients that support invoke (class or instance)
-        elif hasattr(client, "invoke") and callable(getattr(client, "invoke")):
-            def invoke_wrapper(*args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None) 
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(*args, **kwargs)
-                duration = time.time() - start_time
-                tools = kwargs.pop('tools', None)
-                input_messages = kwargs.pop('input', None)
-                cb_result = callback(input_messages, response)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration, 
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            if isinstance(client, type):
-                setattr(client, "invoke", invoke_wrapper)
-            else:
-                client.invoke = types.MethodType(invoke_wrapper, client)
+        Used internally to identify the correct function to wrap when monitoring
+        various types of LLM clients.
+
+    
+    Args:
+            client: The LLM client object to analyze.
+
+    
+    Returns:
+            Callable: The original LLM invocation function.
+            
+    
+    Raises:
+            ValueError: If the client type is not supported.
+        """
+        # This method is kept for backward compatibility
+        # New code should use _detect_client_type instead
+        client_type, method = self._detect_client_type(client)
+        return method
+
+    def _make_request(self, endpoint, method="post", **kwargs):
+        """
+        Make an HTTP request to the RagMetrics API.
         
-        # LiteLLM-style clients (module-level function)
-        elif hasattr(client, "completion"):
-            def lite_wrapper(*args, **kwargs):
-                start_time = time.time()
-                metadata_llm = kwargs.pop('metadata', None)
-                contexts = kwargs.pop('contexts', None)
-                expected = kwargs.pop('expected', None)
-                response = orig_invoke(*args, **kwargs)
-                duration = time.time() - start_time
-                tools = kwargs.pop('tools', None)
-                input_messages = kwargs.get('messages')
-                cb_result = callback(input_messages, response)
-                self._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata_llm,
-                    contexts=contexts,
-                    expected=expected,
-                    duration=duration, 
-                    tools=tools, 
-                    callback_result=cb_result, 
-                    **kwargs
-                )
-                return response
-            client.completion = lite_wrapper
-        
-        #Unknown client
-        else:
-            raise ValueError("Unsupported client")
+        Used internally by various methods to communicate with the RagMetrics API.
+
+    
+    Args:
+            endpoint: The API endpoint to call (e.g., "/api/client/login/").
+            method: The HTTP method to use (default: "post").
+            **kwargs: Additional arguments to pass to the requests library.
+
+    
+    Returns:
+            Response: The HTTP response from the API.
+        """
+        url = f"{self.base_url}{endpoint}"
+        response = requests.request(method, url, **kwargs)
+        return response
 
 class RagMetricsObject:
     """
