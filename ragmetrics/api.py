@@ -360,6 +360,8 @@ class RagMetricsClient:
         if isinstance(metadata_llm, dict):
             union_metadata.update(metadata_llm)
 
+        tools = kwargs.get('tools', None)
+
         # Construct the payload with placeholders for callback result
         payload = {
             "raw": {
@@ -372,7 +374,7 @@ class RagMetricsClient:
             "metadata": union_metadata,
             "contexts": contexts,
             "expected": expected,
-            "tools": kwargs.get('tools', None),
+            "tools": tools,
             "input": None,
             "output": None,
             "scores": None,
