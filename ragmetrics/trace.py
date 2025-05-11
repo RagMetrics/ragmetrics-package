@@ -1,4 +1,4 @@
-from .api import RagMetricsObject, ragmetrics_client, logger, RagMetricsError
+from .base_object import RagMetricsObject
 
 class Trace(RagMetricsObject):
     """

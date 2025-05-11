@@ -11,14 +11,14 @@ def test_openai_wrapper_handles_client_metadata(ragmetrics_test_client: RagMetri
     rm_client = ragmetrics_test_client
     original_client_meta = rm_client.metadata
     rm_client.metadata = {"client_meta": "global"} 
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
 
     # Define a side effect function for the mock_log_trace
     def mock_log_trace_side_effect_metadata(*args, **kwargs):
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-metadata-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-metadata-side-effect")
         return {"id": "mock-trace-id-metadata-side-effect"}
 
     with patch.object(rm_client, '_log_trace') as mock_log_trace_local:
@@ -36,7 +36,7 @@ def test_openai_wrapper_handles_client_metadata(ragmetrics_test_client: RagMetri
         if not test_mock:
             if rm_client.logging_off:
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0, "Trace IDs should be empty if logging is off"
+                assert len(rm_client.trace_ids) == 0, "Trace IDs should be empty if logging is off"
             else:
                 mock_log_trace_local.assert_called_once()
                 log_args, log_kwargs = mock_log_trace_local.call_args
@@ -48,9 +48,9 @@ def test_openai_wrapper_handles_client_metadata(ragmetrics_test_client: RagMetri
                 }
                 assert log_kwargs['metadata_llm'] == expected_metadata
                 assert log_kwargs['model_name'] == "gpt-test"
-                assert len(rm_client.test_logged_trace_ids) == 1, "One trace ID should be logged"
+                assert len(rm_client.trace_ids) == 1, "One trace ID should be logged"
         else: 
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0, "Trace IDs should be empty when mocking"
+            assert len(rm_client.trace_ids) == 0, "Trace IDs should be empty when mocking"
     
     rm_client.metadata = original_client_meta 

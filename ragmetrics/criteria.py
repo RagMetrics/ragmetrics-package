@@ -1,4 +1,4 @@
-from .api import RagMetricsObject
+from .base_object import RagMetricsObject
 
 class Criteria(RagMetricsObject):
     """

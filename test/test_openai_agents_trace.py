@@ -12,7 +12,7 @@ try:
     from agents import Agent, ModelSettings, Runner
     from ragmetrics.api import ragmetrics_client
 except ImportError as e:
-    pytest.fail(f"Required dependencies not found: {e}")
+    pytest.skip(f"Required dependency 'agents' not found: {e}", allow_module_level=True)
 
 # Define Pydantic models
 class PriceBreakdown(BaseModel):

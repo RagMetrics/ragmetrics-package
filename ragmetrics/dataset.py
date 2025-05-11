@@ -1,4 +1,4 @@
-from .api import RagMetricsObject
+from .base_object import RagMetricsObject
 import logging
 
 logger = logging.getLogger(__name__)

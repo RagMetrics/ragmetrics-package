@@ -1,4 +1,4 @@
-from .api import RagMetricsObject  # This is your HTTP client wrapper for RagMetrics
+from .base_object import RagMetricsObject# This is your HTTP client wrapper for RagMetrics
 from .utils import import_function
 
 class Task(RagMetricsObject):

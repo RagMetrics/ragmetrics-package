@@ -1,0 +1,51 @@
+name: Test OpenAI Versions
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.9, 3.10]
+        openai-version: [0.28.1, 1.27.0]
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install pytest pytest-cov
+        python -m pip install "openai==${{ matrix.openai-version }}"
+        python -m pip install -e .
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    
+    - name: Display OpenAI version
+      run: |
+        python -c "import openai; print(f'OpenAI version: {openai.__version__}')"
+    
+    - name: Run OpenAI version-specific tests
+      run: |
+        pytest test/test_openai_versions.py -v
+        
+    - name: Run integration tests specific to this version
+      run: |
+        if [[ "${{ matrix.openai-version }}" == 0.* ]]; then
+          # Tests for OpenAI v0.x
+          pytest test/integrations/openai_chat_wrapper/ -v -k "not v1"
+        else
+          # Tests for OpenAI v1.x
+          pytest test/integrations/openai_chat_wrapper/ -v -k "not v0"
+        fi 

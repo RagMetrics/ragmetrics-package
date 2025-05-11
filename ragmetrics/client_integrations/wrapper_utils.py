@@ -4,8 +4,6 @@ import inspect # Added for checking awaitable callback
 import logging # Import logging
 import types # Added
 
-# Forward declaration for RagMetricsClient to avoid circular import if type hinting directly
-# from ragmetrics.api import RagMetricsClient 
 
 logger = logging.getLogger(__name__) # Setup logger
 
@@ -58,11 +56,20 @@ def _extract_final_log_parameters(
     final_tools = dynamic_details.get("tools", static_tools)
     final_tool_choice = dynamic_details.get("tool_choice") 
 
+    # Log metadata sources for debugging
+    logger.info(f"Merging metadata from sources:")
+    logger.info(f"- rm_client_metadata: {rm_client_metadata}")
+    logger.info(f"- dynamic_details additional_llm_metadata: {dynamic_details.get('additional_llm_metadata')}")
+    logger.info(f"- user_call_metadata: {user_call_metadata}")
+
+    # Important: The order here determines precedence (later sources override earlier ones)
     final_metadata_for_log = {
         **(rm_client_metadata or {}), 
         **(dynamic_details.get("additional_llm_metadata") or {}), 
         **(user_call_metadata or {})
     }
+    
+    logger.info(f"Final merged metadata: {final_metadata_for_log}")
     
     passthrough_kwargs = { 
         k: v for k, v in original_call_remaining_kwargs.items() 
@@ -115,7 +122,18 @@ def create_sync_wrapper(
         try:
             # Call original method with all original args
             logger.debug(f"Calling original method {method_name}")
-            result = original_method(*args, **kwargs)
+            if is_target_instance_method and len(args) > 0:
+                # For instance methods, we need to ensure we're not passing the instance twice
+                # args[0] is the instance (self)
+                if len(args) > 1:
+                    # If there are more args beyond self, call with those
+                    result = original_method(args[0], *args[1:], **kwargs)
+                else:
+                    # Only self was passed
+                    result = original_method(args[0], **kwargs)
+            else:
+                # For non-instance methods or when no args are provided
+                result = original_method(*args, **kwargs)
         except Exception as e:
             logger.error(f"Error in original method {method_name}: {e}")
             error_obj = e
@@ -208,7 +226,18 @@ def create_async_wrapper(
         try:
             # Call original method with all original args
             logger.debug(f"Calling original async method {method_name}")
-            result = await original_method(*args, **kwargs)
+            if is_target_instance_method and len(args) > 0:
+                # For instance methods, we need to ensure we're not passing the instance twice
+                # args[0] is the instance (self)
+                if len(args) > 1:
+                    # If there are more args beyond self, call with those
+                    result = await original_method(args[0], *args[1:], **kwargs)
+                else:
+                    # Only self was passed
+                    result = await original_method(args[0], **kwargs)
+            else:
+                # For non-instance methods or when no args are provided
+                result = await original_method(*args, **kwargs)
         except Exception as e:
             logger.error(f"Error in original async method {method_name}: {e}")
             error_obj = e

@@ -9,7 +9,7 @@ from ragmetrics.utils import default_callback
 
 def test_openai_wrapper_handles_tools(ragmetrics_test_client: RagMetricsClient, mock_openai_completions_object):
     rm_client = ragmetrics_test_client
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
     original_client_meta = rm_client.metadata 
     rm_client.metadata = None 
 
@@ -18,7 +18,7 @@ def test_openai_wrapper_handles_tools(ragmetrics_test_client: RagMetricsClient, 
     # Define a side effect function for the mock_log_trace
     def mock_log_trace_side_effect_tools(*args, **kwargs):
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-tools-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-tools-side-effect")
         return {"id": "mock-trace-id-tools-side-effect"}
 
     with patch.object(rm_client, '_log_trace') as mock_log_trace_local:
@@ -39,7 +39,7 @@ def test_openai_wrapper_handles_tools(ragmetrics_test_client: RagMetricsClient, 
         if not test_mock:
             if rm_client.logging_off:
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0
+                assert len(rm_client.trace_ids) == 0
             else:
                 mock_log_trace_local.assert_called_once()
                 log_args, log_kwargs = mock_log_trace_local.call_args
@@ -54,9 +54,9 @@ def test_openai_wrapper_handles_tools(ragmetrics_test_client: RagMetricsClient, 
                 
                 expected_callback_res = default_callback(input_messages, "original_response")
                 assert log_kwargs['callback_result'] == expected_callback_res 
-                assert len(rm_client.test_logged_trace_ids) == 1
+                assert len(rm_client.trace_ids) == 1
         else:
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0
+            assert len(rm_client.trace_ids) == 0
     
     rm_client.metadata = original_client_meta 

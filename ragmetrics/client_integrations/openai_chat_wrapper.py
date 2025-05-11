@@ -6,7 +6,26 @@ import inspect
 from ragmetrics.utils import default_output
 from .wrapper_utils import create_sync_wrapper, create_async_wrapper
 
+# Set up more verbose logging for debugging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+# Create console handler if not already present
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    logger.debug("Enabled debug logging for OpenAI wrapper")
+
+def is_openai_v1():
+    """Check if we're using OpenAI v1.x"""
+    try:
+        import openai
+        openai_version = getattr(openai, '__version__', '0.0.0')
+        return openai_version.startswith('1.')
+    except ImportError:
+        return False
 
 def _extract_openai_call_details(kwargs: Dict[str, Any]) -> Tuple[Optional[List[Any]], Optional[Any], Dict[str, Any], Dict[str, Any]]:
     """Extracts RagMetrics-specific args and prepares kwargs for the actual LLM call.
@@ -14,6 +33,7 @@ def _extract_openai_call_details(kwargs: Dict[str, Any]) -> Tuple[Optional[List[
     """
     llm_call_kwargs = kwargs.copy() # Work on a copy
 
+    # Extract RagMetrics-specific parameters (remove them from llm_call_kwargs)
     contexts = llm_call_kwargs.pop("contexts", None)
     expected = llm_call_kwargs.pop("expected", None)
     user_call_metadata = llm_call_kwargs.pop("metadata", None) 
@@ -112,20 +132,81 @@ def wrap_openai_chat_completions_create(
     static_model_name = None # Cannot easily get from `completions_obj`
     static_tools = None      # Tools are always passed to `create`
 
-    wrapper_fn = create_sync_wrapper(
-        rm_client=rm_client,
-        original_method=original_create_method,
-        is_target_instance_method=True, # completions_obj is an instance
-        callback=callback,
-        input_extractor=_openai_chat_input_extractor,
-        output_extractor=_openai_chat_output_extractor,
-        dynamic_llm_details_extractor=_openai_chat_dynamic_llm_details_extractor,
-        static_model_name=static_model_name, # Typically None here, relies on dynamic or higher-level config
-        static_tools=static_tools # Tools are dynamic for chat completions
-    )
+    # OpenAI v1's create method has a different parameter binding model than expected.
+    # Instead of trying to rebind it with types.MethodType (which causes issues),
+    # we'll directly create a wrapper that properly handles the binding.
     
-    # `completions_obj` (e.g., `client.chat.completions`) is an instance, so we bind the method.
-    setattr(completions_obj, method_name_to_wrap, types.MethodType(wrapper_fn, completions_obj))
+    # Define wrapper with appropriate signature for OpenAI v1 client methods
+    def create_wrapper(*args, **kwargs):
+        logger.debug("===== RAGMETRICS WRAPPER CALLED =====")
+        logger.info(f"RagMetrics: OpenAI v1 chat.completions.create wrapper called")
+        
+        # Create a copy of kwargs to avoid modifying the original
+        openai_kwargs = kwargs.copy()
+        
+        # Extract RagMetrics-specific parameters from kwargs
+        contexts = openai_kwargs.pop("contexts", None)
+        expected = openai_kwargs.pop("expected", None)
+        metadata = openai_kwargs.pop("metadata", {}).copy() if "metadata" in openai_kwargs else {}
+        force_new_conversation = openai_kwargs.pop("force_new_conversation", False)
+        
+        logger.debug(f"Extracted contexts: {contexts}")
+        logger.debug(f"Cleaned kwargs keys: {list(openai_kwargs.keys())}")
+        
+        # Get important parameters for the trace (not for metadata)
+        model_name = openai_kwargs.get("model", None)
+        messages = openai_kwargs.get("messages", [])
+        tools = openai_kwargs.get("tools", None)
+        tool_choice = openai_kwargs.get("tool_choice", None)
+        
+        # Measure request time
+        start_time = time.time()
+        
+        # Call the original create method
+        try:
+            # Call original method with all original args and cleaned kwargs (without contexts)
+            response = original_create_method(*args, **openai_kwargs)
+            error = None
+        except Exception as e:
+            error = e
+            logger.error(f"Error in OpenAI create call: {str(e)}")
+            raise
+        finally:
+            # Calculate duration
+            duration = time.time() - start_time
+            
+            # Don't log if error and no response
+            if error is not None and 'response' not in locals():
+                return
+            
+            # Process callback if provided
+            callback_result = None
+            if callback and 'response' in locals():
+                try:
+                    callback_result = callback(messages, response)
+                except Exception as e:
+                    logger.error(f"Callback error in OpenAI v1 wrapper: {e}")
+            
+            # Log trace with RagMetrics
+            rm_client._log_trace(
+                input_messages=messages,
+                response=response if 'response' in locals() else None,
+                metadata_llm=metadata,
+                contexts=contexts,
+                expected=expected,
+                duration=duration,
+                model_name=model_name,
+                tools=tools,
+                tool_choice=tool_choice,
+                callback_result=callback_result,
+                force_new_conversation=force_new_conversation,
+                error=error
+            )
+            
+        return response
+    
+    # Replace the original method. In OpenAI v1, this is cleaner than using types.MethodType
+    setattr(completions_obj, method_name_to_wrap, create_wrapper)
     logger.info(f"Successfully wrapped OpenAI Completions '{method_name_to_wrap}' for RagMetrics logging.")
     return True
 
@@ -159,21 +240,138 @@ def wrap_openai_chat_completions_acreate(
     static_model_name = None
     static_tools = None
 
-    async_wrapper_fn = create_async_wrapper(
-        rm_client=rm_client,
-        original_method=original_acreate_method,
-        is_target_instance_method=True, # async_completions_obj is an instance
-        callback=callback,
-        input_extractor=_openai_chat_input_extractor,
-        output_extractor=_openai_chat_output_extractor,
-        dynamic_llm_details_extractor=_openai_chat_dynamic_llm_details_extractor,
-        static_model_name=static_model_name,
-        static_tools=static_tools
-    )
+    # Define async wrapper with appropriate signature for OpenAI v1 async client methods
+    async def acreate_wrapper(*args, **kwargs):
+        logger.debug("===== RAGMETRICS ASYNC WRAPPER CALLED =====")
+        logger.info(f"RagMetrics: OpenAI v1 chat.completions.acreate wrapper called")
+        
+        # Create a copy of kwargs to avoid modifying the original
+        openai_kwargs = kwargs.copy()
+        
+        # Extract RagMetrics-specific parameters from kwargs
+        contexts = openai_kwargs.pop("contexts", None)
+        expected = openai_kwargs.pop("expected", None)
+        metadata = openai_kwargs.pop("metadata", {}).copy() if "metadata" in openai_kwargs else {}
+        force_new_conversation = openai_kwargs.pop("force_new_conversation", False)
+        
+        logger.debug(f"Extracted contexts: {contexts}")
+        logger.debug(f"Cleaned kwargs keys: {list(openai_kwargs.keys())}")
+        
+        # Get important parameters for the trace (not for metadata)
+        model_name = openai_kwargs.get("model", None)
+        messages = openai_kwargs.get("messages", [])
+        tools = openai_kwargs.get("tools", None)
+        tool_choice = openai_kwargs.get("tool_choice", None)
+        
+        # Measure request time
+        start_time = time.time()
+        
+        # Call the original async create method
+        try:
+            # Call original method with all original args and cleaned kwargs (without contexts)
+            response = await original_acreate_method(*args, **openai_kwargs)
+            error = None
+        except Exception as e:
+            error = e
+            logger.error(f"Error in OpenAI acreate call: {str(e)}")
+            raise
+        finally:
+            # Calculate duration
+            duration = time.time() - start_time
+            
+            # Don't log if error and no response
+            if error is not None and 'response' not in locals():
+                return
+            
+            # Process callback if provided
+            callback_result = None
+            if callback and 'response' in locals():
+                try:
+                    callback_result = callback(messages, response)
+                except Exception as e:
+                    logger.error(f"Callback error in OpenAI v1 async wrapper: {e}")
+            
+            # Log trace with RagMetrics (using async version if available)
+            try:
+                if hasattr(rm_client, '_alog_trace'):
+                    await rm_client._alog_trace(
+                        input_messages=messages,
+                        response=response if 'response' in locals() else None,
+                        metadata_llm=metadata,
+                        contexts=contexts,
+                        expected=expected,
+                        duration=duration,
+                        model_name=model_name,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        callback_result=callback_result,
+                        force_new_conversation=force_new_conversation,
+                        error=error
+                    )
+                else:
+                    # Fallback to sync logging if async not available
+                    rm_client._log_trace(
+                        input_messages=messages,
+                        response=response if 'response' in locals() else None,
+                        metadata_llm=metadata,
+                        contexts=contexts,
+                        expected=expected,
+                        duration=duration,
+                        model_name=model_name,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        callback_result=callback_result,
+                        force_new_conversation=force_new_conversation,
+                        error=error
+                    )
+            except Exception as e:
+                logger.error(f"Error logging trace in async wrapper: {e}")
+            
+        return response
     
-    setattr(async_completions_obj, method_name_to_wrap, types.MethodType(async_wrapper_fn, async_completions_obj))
+    # Replace the original method
+    setattr(async_completions_obj, method_name_to_wrap, acreate_wrapper)
     logger.info(f"Successfully wrapped OpenAI AsyncCompletions '{method_name_to_wrap}' for async RagMetrics logging.")
     return True
 
 # The old top-level wrap_openai_chat_completions function is removed as it's superseded by the specific create/acreate wrappers.
 # If it was meant for older SDK versions, that logic would need to be re-evaluated or placed in a separate legacy handler. 
+
+def wrap_openai_module_v1(rm_client: Any, openai_module: Any, callback: Optional[Callable]) -> bool:
+    """
+    Wrap the OpenAI v1.x module for monitoring.
+    This is for cases when the module itself is passed to monitor() rather than a client instance.
+    
+    Args:
+        rm_client: RagMetricsClient instance
+        openai_module: The openai module (not a class instance)
+        callback: Optional callback function for custom processing
+        
+    Returns:
+        bool: True if wrapping was successful
+    """
+    if not is_openai_v1():
+        logger.debug("OpenAI v1.x module wrapper skipped - not running on v1.x")
+        return False
+        
+    # Create an OpenAI client if the module is passed
+    if not hasattr(openai_module, 'OpenAI'):
+        logger.warning("OpenAI module does not have OpenAI client class")
+        return False
+
+    # Create a client instance
+    try:
+        client = openai_module.OpenAI()
+        if hasattr(client, 'chat') and hasattr(client.chat, 'completions'):
+            # Now wrap the client's chat.completions.create method
+            success = wrap_openai_chat_completions_create(rm_client, client.chat.completions, callback)
+            if success:
+                logger.info("Successfully wrapped OpenAI v1.x module by creating and wrapping a client instance")
+                # Store the wrapped client on the module for future use
+                if not hasattr(openai_module, '_ragmetrics_wrapped_client'):
+                    setattr(openai_module, '_ragmetrics_wrapped_client', client)
+                return True
+    except Exception as e:
+        logger.error(f"Error wrapping OpenAI v1.x module: {e}")
+        
+    return False 

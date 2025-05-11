@@ -26,7 +26,16 @@ Core API Functions:
 * **Trace**: Access and manipulate logged interactions, including inputs, outputs, and metadata
 """
 
-from .api import RagMetricsClient, ragmetrics_client, login, monitor, RagMetricsObject
+from .api import (
+    login, 
+    monitor,
+    RagMetricsError,
+    RagMetricsConfigError,
+    RagMetricsAuthError,
+    RagMetricsAPIError
+)
+from .client import RagMetricsClient, ragmetrics_client
+from .base_object import RagMetricsObject
 from .decorators import trace_function_call
 from .dataset import Dataset, Example
 from .tasks import Task
@@ -35,6 +44,9 @@ from .experiments import Experiment, Cohort
 from .criteria import Criteria
 from .reviews import ReviewQueue
 from .trace import Trace
+from .client import ragmetrics_client, login, monitor
+from .default_callback import default_callback, default_input, default_output
+from .openai_chat_wrapper import patch_openai_client
 
 __all__ = [
     "RagMetricsClient",
@@ -54,4 +66,87 @@ __all__ = [
     "Criteria",
     "ReviewQueue",
     "Trace",
+    "RagMetricsError",
+    "RagMetricsConfigError",
+    "RagMetricsAuthError",
+    "RagMetricsAPIError"
 ]
+
+# Create a trace_function_call decorator
+def trace_function_call(func):
+    """
+    Decorator to trace function execution and log structured input/output.
+    
+    Wrap a function with this decorator to automatically log its execution
+    details to RagMetrics, including inputs, outputs, and timing information.
+    This is particularly useful for tracking retrieval functions in RAG applications.
+
+    Args:
+        func: The function to be traced.
+
+    Returns:
+        Callable: A wrapped version of the function that logs execution details.
+    """
+    def wrapper(*args, **kwargs):
+        import time
+        import uuid
+        
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        duration = time.time() - start_time
+
+        # Format parameters in the requested format
+        params = []
+        # Add positional arguments
+        for i, arg in enumerate(args):
+            # Try to get the parameter name from the function signature
+            try:
+                import inspect
+                sig = inspect.signature(func)
+                param_names = list(sig.parameters.keys())
+                if i < len(param_names):
+                    params.append(f"{param_names[i]}={repr(arg)}")
+                else:
+                    params.append(f"{repr(arg)}")
+            except:
+                params.append(f"{repr(arg)}")
+        
+        # Add keyword arguments
+        for k, v in kwargs.items():
+            params.append(f"{k}={repr(v)}")
+        
+        # Create the formatted function call string
+        formatted_call = f"={func.__name__}({', '.join(params)})"
+
+        # Prepare structured input format
+        function_input = [
+            {
+                "role": "user",
+                "content": formatted_call,
+                "tool_call": True
+            }
+        ]
+
+        function_output = {
+            "result": result
+        }
+
+        # Log the function execution
+        ragmetrics_client._log_trace(
+            input_messages=function_input,
+            response=function_output,
+            metadata_llm=None,
+            contexts=None,
+            duration=duration,
+            tools=None,  
+            callback_result={
+                "input": formatted_call,
+                "output": result
+            }
+        )
+        return result
+
+    return wrapper
+
+# Version information
+__version__ = '0.2.0'

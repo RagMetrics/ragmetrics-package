@@ -10,7 +10,7 @@ from ragmetrics.utils import default_callback # default_callback might be used i
 # Test wrapper behavior when the original OpenAI call raises an error
 def test_openai_wrapper_handles_error_in_original_call(ragmetrics_test_client: RagMetricsClient, mock_openai_completions_object):
     rm_client = ragmetrics_test_client
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
     
@@ -21,7 +21,7 @@ def test_openai_wrapper_handles_error_in_original_call(ragmetrics_test_client: R
     # Define a side effect function for the mock_log_trace
     def mock_log_trace_side_effect_error(*args, **kwargs):
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-error-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-error-side-effect")
         # Check that the error is passed to _log_trace
         assert kwargs.get('error') is simulated_error
         return {"id": "mock-trace-id-error-side-effect"}
@@ -43,13 +43,13 @@ def test_openai_wrapper_handles_error_in_original_call(ragmetrics_test_client: R
         if not test_mock:
             if rm_client.logging_off:
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0
+                assert len(rm_client.trace_ids) == 0
             else:
                 mock_log_trace_local.assert_called_once()
                 log_args, log_kwargs = mock_log_trace_local.call_args
                 assert log_kwargs['input_messages'] == input_messages
                 assert log_kwargs['error'] is simulated_error # Verify error was logged
-                assert len(rm_client.test_logged_trace_ids) == 1
+                assert len(rm_client.trace_ids) == 1
         else: 
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0 
+            assert len(rm_client.trace_ids) == 0 

@@ -2,165 +2,261 @@
 # It can also be used for a registry or to expose wrapper functions
 import logging
 import types # For isinstance checks if needed
-from typing import Any # Import Any
+from typing import Any, Dict, List, Optional, Callable, Type, Union
+from importlib import import_module
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
-# --- Import specific wrapper functions --- 
-from .openai_chat_wrapper import wrap_openai_chat_completions_create, wrap_openai_chat_completions_acreate
-from .langchain_wrapper import wrap_langchain_invoke, wrap_langchain_ainvoke
-from .litellm_wrapper import wrap_litellm_completion, wrap_litellm_acompletion
-from .openai_agent_wrapper import wrap_openai_agent_runner_sync, wrap_openai_agent_runner_async
+# Define a registry for client integrations
+INTEGRATION_REGISTRY = []
 
-# Import the OpenAI Agents trace processor
-try:
-    from .openai_agents_trace_processor import register_trace_processor, AGENTS_TRACING_AVAILABLE
-except ImportError:
-    logger.warning("Failed to import openai_agents_trace_processor, tracing integration will not be available")
-    register_trace_processor = None
-    AGENTS_TRACING_AVAILABLE = False
-
-# Helper to safely check for Runner type if openai-agents is optional
-# Try multiple import paths for better compatibility
-OpenAIAgentRunner = None
-try:
-    from agents import Runner as OpenAIAgentRunner  # First attempt - direct import
-    logger.debug("Successfully imported Runner from agents")
-except ImportError:
-    try:
-        from agents.run import Runner as OpenAIAgentRunner  # Second attempt - from run module
-        logger.debug("Successfully imported Runner from agents.run")
-    except ImportError:
-        logger.debug("OpenAI Agents SDK not available or Runner not found")
-        OpenAIAgentRunner = None
-
-# Helper to safely check for LiteLLM module if optional
-try:
-    import litellm
-except ImportError:
-    litellm = None
-
-# Helper to safely import OpenAI and AsyncOpenAI from openai package v1.0+
-try:
-    from openai import OpenAI, AsyncOpenAI
-except ImportError:
-    OpenAI = None
-    AsyncOpenAI = None
-
-INTEGRATION_REGISTRY = [
-    {
-        "name": "OpenAI API Client (SYNC Chat Completions)",
-        "client_type_check": lambda client: OpenAI is not None and isinstance(client, OpenAI) and \
-                                         hasattr(client, "chat") and hasattr(client.chat, "completions"),
-        "target_object_path": "chat.completions",
-        "methods_to_wrap": {
-            "create": wrap_openai_chat_completions_create,
-        },
-        # No async_methods_to_wrap for the purely sync client
-    },
-    {
-        "name": "OpenAI API Client (ASYNC Chat Completions)",
-        "client_type_check": lambda client: AsyncOpenAI is not None and isinstance(client, AsyncOpenAI) and \
-                                         hasattr(client, "chat") and hasattr(client.chat, "completions"),
-        "target_object_path": "chat.completions", # client.chat.completions will be AsyncCompletions
-        "async_methods_to_wrap": {
-            "create": wrap_openai_chat_completions_acreate,
-        }
-        # No methods_to_wrap for 'create' as we are targeting the async 'create'
-    },
-    {
-        "name": "OpenAI Agent SDK Runner",
-        # Check if the client is the Runner class itself (not an instance)
-        "client_type_check": lambda client: OpenAIAgentRunner is not None and (
-            client is OpenAIAgentRunner or  # Direct reference check
-            (hasattr(client, '__name__') and client.__name__ == 'Runner' and  # Class name check
-             (hasattr(client, '__module__') and (
-                 client.__module__ == 'agents' or  # Check from direct import
-                 client.__module__ == 'agents.run' or  # Check from agents.run import
-                 client.__module__.startswith('agents.') # Check for any other agents submodule
-             ))
-            )
-        ),
-        "target_object_path": None, # The class itself is the target
-        "methods_to_wrap": {
-            "run_sync": wrap_openai_agent_runner_sync,
-        },
-        "async_methods_to_wrap": {
-            "run": wrap_openai_agent_runner_async,
-        },
-        "is_class_method": True,  # Flag to indicate we're wrapping class methods, not instance methods
-        "register_trace_processor": register_trace_processor  # Function to register the trace processor
-    },
-    {
-        "name": "LangChain Runnable/Client",
-        # Check for common LangChain runnable attributes/methods.
-        # isinstance(client, Runnable) would be ideal if Runnable is easily importable and universal.
-        "client_type_check": lambda client: hasattr(client, "invoke") or hasattr(client, "ainvoke"),
-        "target_object_path": None, # The client (runnable instance or class) is the target
-        "methods_to_wrap": {
-            "invoke": wrap_langchain_invoke,
-        },
-        "async_methods_to_wrap": {
-            "ainvoke": wrap_langchain_ainvoke,
-        }
-    },
-    {
-        "name": "LiteLLM Module",
-        # Check if the client is the LiteLLM module itself
-        "client_type_check": lambda client: litellm is not None and client is litellm,
-        "target_object_path": None, # The module itself is the target
-        "methods_to_wrap": {
-            "completion": wrap_litellm_completion,
-            # Potentially others like `embedding` if we add wrappers for them
-        },
-        "async_methods_to_wrap": {
-            "acompletion": wrap_litellm_acompletion,
-            # "aembedding": wrap_litellm_aembedding,
-        }
-    },
-]
-
-def find_integration(client: Any):
-    """Finds the first matching integration in the registry."""
-    for integration in INTEGRATION_REGISTRY:
-        try:
-            if integration["client_type_check"](client):
-                logger.debug(f"RagMetrics: Found matching integration for client: {integration['name']}")
-                
-                # If this is the OpenAI Agents Runner, also register the trace processor
-                if AGENTS_TRACING_AVAILABLE and "register_trace_processor" in integration and integration["register_trace_processor"]:
-                    # Import ragmetrics_client here to avoid circular imports
-                    from ragmetrics.api import ragmetrics_client
-                    logger.info("Registering OpenAI Agents trace processor")
-                    success = integration["register_trace_processor"](ragmetrics_client)
-                    if success:
-                        logger.info("Successfully registered OpenAI Agents trace processor")
-                    else:
-                        logger.warning("Failed to register OpenAI Agents trace processor")
-                
-                return integration
-        except Exception as e:
-             logger.debug(f"RagMetrics: Error checking integration '{integration['name']}' for client type {type(client).__name__}: {e}")
-             continue
+class Registry:
+    """Client integration registry with simplified wrapper management."""
     
-    # Log class info for debugging if no match found
-    if isinstance(client, type):  # If it's a class
-        logger.debug(f"No integration found for class: {client.__name__} from module {client.__module__ if hasattr(client, '__module__') else 'unknown'}")
-    elif hasattr(client, '__class__'):
-        logger.debug(f"No integration found for instance type: {client.__class__.__name__}")
-    else:
-        logger.debug(f"No integration found for object: {type(client).__name__}")
+    def __init__(self):
+        self.integrations = []
+        
+    def register(self, client_type=None, target_path=None):
+        """Decorator to register a client integration handler."""
+        def decorator(func):
+            self.integrations.append({
+                'name': func.__name__,
+                'handler': func,
+                'client_type': client_type,
+                'target_path': target_path
+            })
+            return func
+        return decorator
+        
+    def wrapper(self, *methods):
+        """Create a standard wrapper configuration for methods."""
+        return {'methods_to_wrap': {m: globals()[f'wrap_{m}'] for m in methods if globals().get(f'wrap_{m}')}}
+        
+    def async_wrapper(self, *methods):
+        """Create a standard wrapper configuration for async methods."""
+        return {'async_methods_to_wrap': {m: globals()[f'wrap_{m}'] for m in methods if globals().get(f'wrap_{m}')}}
+        
+    def combined(self, sync_methods=None, async_methods=None, **extras):
+        """Create a combined configuration with both sync and async wrappers."""
+        result = {}
+        
+        if sync_methods:
+            result['methods_to_wrap'] = {
+                m: globals()[f'wrap_{m}'] for m in sync_methods if globals().get(f'wrap_{m}')
+            }
+            
+        if async_methods:
+            result['async_methods_to_wrap'] = {
+                m: globals()[f'wrap_{m}'] for m in async_methods if globals().get(f'wrap_{m}')
+            }
+            
+        # Add any extra configuration
+        result.update(extras)
+        return result
+        
+    def find_handler(self, client):
+        """Find the appropriate handler for a client."""
+        for integration in self.integrations:
+            client_type = integration['client_type']
+            
+            # Check if client type matches
+            if client_type is not None:
+                try:
+                    # Import client_type if it's a string (lazy import)
+                    if isinstance(client_type, str):
+                        module_path, class_name = client_type.rsplit('.', 1)
+                        try:
+                            module = import_module(module_path)
+                            client_type = getattr(module, class_name)
+                        except (ImportError, AttributeError):
+                            continue
+                    
+                    # Skip if client doesn't match type
+                    if not (client is client_type or isinstance(client, client_type)):
+                        continue
+                except Exception:
+                    continue
+            
+            try:
+                # Call the integration handler to get wrappers
+                result = integration['handler'](client)
+                if result:
+                    # Add standard info to the result
+                    result['name'] = integration['name']
+                    if 'target_object_path' not in result and integration['target_path']:
+                        result['target_object_path'] = integration['target_path']
+                    return result
+            except Exception:
+                continue
+        
+        return None
+
+# Create the global registry
+registry = Registry()
+
+# --- Import common wrapper functions ---
+for wrapper_name in [
+    'openai_chat_completions_create', 'openai_chat_completions_acreate', 
+    'langchain_invoke', 'langchain_ainvoke',
+    'litellm_completion', 'litellm_acompletion',
+    'openai_agent_runner_sync', 'openai_agent_runner_async',
+    'openai_module_v1'
+]:
+    try:
+        # Import all wrappers from appropriate modules (will be populated into globals())
+        exec(f"from .{wrapper_name.split('_')[0]}_wrapper import wrap_{wrapper_name}")
+    except (ImportError, AttributeError):
+        # Create dummy function if import fails
+        exec(f"def wrap_{wrapper_name}(*args, **kwargs): return False")
+
+# Import OpenAI v0.x wrappers if available
+try:
+    from .openai_v0_wrapper import wrap_openai_v0_chat_completion, wrap_openai_v0_completion, is_openai_v0
+    HAS_OPENAI_V0 = True
+except ImportError:
+    wrap_openai_v0_chat_completion = lambda *args: False
+    wrap_openai_v0_completion = lambda *args: False
+    is_openai_v0 = lambda: False
+    HAS_OPENAI_V0 = False
+
+# Import other utility functions
+try:
+    from .openai_chat_wrapper import is_openai_v1
+except ImportError:
+    is_openai_v1 = lambda: False
+
+# Import the OpenAI Agents trace processor if available
+try:
+    from .openai_agents_trace_processor import register_trace_processor
+    HAS_AGENTS_TRACING = True
+except ImportError:
+    register_trace_processor = lambda *args: False
+    HAS_AGENTS_TRACING = False
+
+# --- Register integrations using decorators ---
+
+@registry.register(client_type='openai.OpenAI', target_path='chat.completions')
+def openai_client(client):
+    """OpenAI V1 Client integration."""
+    return registry.wrapper('openai_chat_completions_create')
+
+@registry.register(client_type='openai.AsyncOpenAI', target_path='chat.completions')
+def async_openai_client(client):
+    """Async OpenAI V1 Client integration."""
+    return registry.async_wrapper('openai_chat_completions_acreate')
+
+@registry.register()
+def openai_module(client):
+    """OpenAI module (v1 or v0) integration."""
+    # Check if it's a module named 'openai'
+    if not (isinstance(client, types.ModuleType) and client.__name__ == 'openai'):
+        return None
+        
+    # V0 integration (has ChatCompletion)
+    if HAS_OPENAI_V0 and is_openai_v0() and hasattr(client, 'ChatCompletion'):
+        return {
+            'methods_to_wrap': {
+                'ChatCompletion.create': wrap_openai_v0_chat_completion,
+                'Completion.create': wrap_openai_v0_completion
+            }
+        }
+    
+    # V1 integration
+    if is_openai_v1():
+        return registry.wrapper('openai_module_v1')
     
     return None
 
-__all__ = [
-    # Specific wrappers can be exposed if users need to apply them manually, though `monitor` is preferred.
-    "wrap_openai_chat_completions_create", "wrap_openai_chat_completions_acreate",
-    "wrap_langchain_invoke", "wrap_langchain_ainvoke",
-    "wrap_litellm_completion", "wrap_litellm_acompletion",
-    "wrap_openai_agent_runner_sync", "wrap_openai_agent_runner_async",
-    "find_integration",
-    "INTEGRATION_REGISTRY",
-    # OpenAI Agents trace processor
-    "register_trace_processor", "AGENTS_TRACING_AVAILABLE"
-] 
+@registry.register()
+def litellm_module(client):
+    """LiteLLM module integration."""
+    try:
+        import litellm
+        if client is litellm:
+            return registry.combined(
+                sync_methods=['litellm_completion'],
+                async_methods=['litellm_acompletion']
+            )
+    except ImportError:
+        pass
+    return None
+
+@registry.register()
+def openai_agent_runner(client):
+    """OpenAI Agent Runner integration."""
+    try:
+        # Try both import paths
+        Runner = None
+        for import_path in ['agents', 'agents.run']:
+            try:
+                module = import_module(import_path)
+                Runner = getattr(module, 'Runner')
+                break
+            except (ImportError, AttributeError):
+                continue
+                
+        if Runner and (isinstance(client, Runner) or client is Runner):
+            result = registry.combined(
+                sync_methods=['openai_agent_runner_sync'],
+                async_methods=['openai_agent_runner_async']
+            )
+            
+            # Add trace processor if available
+            if HAS_AGENTS_TRACING:
+                result['register_trace_processor'] = register_trace_processor
+                
+            return result
+    except Exception:
+        pass
+    return None
+
+@registry.register()
+def langchain_runnable(client):
+    """LangChain Runnable integration."""
+    # Check for invoke/ainvoke methods
+    if not (hasattr(client, 'invoke') or hasattr(client, 'ainvoke')):
+        return None
+        
+    # Try to get Runnable for more specific type check
+    try:
+        for import_path in ['langchain.schema.runnable', 'langchain.schema']:
+            try:
+                module = import_module(import_path)
+                Runnable = getattr(module, 'Runnable')
+                # If we found Runnable but client isn't an instance, rely on method check
+                if not isinstance(client, Runnable):
+                    pass
+                break
+            except (ImportError, AttributeError):
+                continue
+    except Exception:
+        pass
+        
+    # Return appropriate wrappers based on available methods
+    methods = {}
+    if hasattr(client, 'invoke'):
+        methods['sync_methods'] = ['langchain_invoke']
+    if hasattr(client, 'ainvoke'):
+        methods['async_methods'] = ['langchain_ainvoke']
+        
+    return registry.combined(**methods)
+
+def find_integration(client: Any):
+    """Find the first matching integration for the given client."""
+    # Use the registry to find a handler
+    integration = registry.find_handler(client)
+    
+    # If found and has trace processor, register it
+    if integration and HAS_AGENTS_TRACING and 'register_trace_processor' in integration:
+        from ragmetrics.api import ragmetrics_client
+        integration['register_trace_processor'](ragmetrics_client)
+    
+    # For backwards compatibility
+    if integration and integration not in INTEGRATION_REGISTRY:
+        INTEGRATION_REGISTRY.append(integration)
+        
+    return integration
+
+# Export public API
+__all__ = ["find_integration", "registry"] 

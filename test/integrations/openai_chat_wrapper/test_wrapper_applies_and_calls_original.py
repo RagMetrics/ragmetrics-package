@@ -13,13 +13,13 @@ def test_openai_wrapper_applies_and_calls_original(ragmetrics_test_client: RagMe
     completions_obj, original_create_mock = mock_openai_completions_object
 
     if hasattr(rm_client, 'test_logged_trace_ids'):
-        rm_client.test_logged_trace_ids = []
+        rm_client.trace_ids = []
 
     # Define a side effect function for the mock_log_trace
     def mock_log_trace_side_effect_basic(*args, **kwargs):
         # Simulate the real _log_trace appending an ID
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-basic-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-basic-side-effect")
         # Simulate returning a response like the real _log_trace might
         return {"id": "mock-trace-id-basic-side-effect"}
 
@@ -60,7 +60,7 @@ def test_openai_wrapper_applies_and_calls_original(ragmetrics_test_client: RagMe
         if not test_mock:
             if rm_client.logging_off: 
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0, "Trace IDs should be empty if logging is off"
+                assert len(rm_client.trace_ids) == 0, "Trace IDs should be empty if logging is off"
             else: 
                 mock_log_trace_local.assert_called_once()
                 log_args_tuple, log_kwargs_dict = mock_log_trace_local.call_args
@@ -76,7 +76,7 @@ def test_openai_wrapper_applies_and_calls_original(ragmetrics_test_client: RagMe
                 assert log_kwargs_dict['tools'] is None
                 expected_callback_res = default_callback(input_messages, "original_response")
                 assert log_kwargs_dict['callback_result'] == expected_callback_res
-                assert len(rm_client.test_logged_trace_ids) == 1, "One trace ID should be logged"
+                assert len(rm_client.trace_ids) == 1, "One trace ID should be logged"
         else: 
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0, "No trace IDs logged when TEST_MOCK=true" 
+            assert len(rm_client.trace_ids) == 0, "No trace IDs logged when TEST_MOCK=true" 

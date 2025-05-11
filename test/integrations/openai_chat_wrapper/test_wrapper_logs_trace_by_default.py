@@ -13,13 +13,13 @@ def test_openai_wrapper_logs_trace_by_default(ragmetrics_test_client: RagMetrics
     # Ensure client metadata is None for this test of defaults
     original_client_meta = rm_client.metadata
     rm_client.metadata = None
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
 
     def mock_log_trace_side_effect_default(*args, **kwargs):
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-default-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-default-side-effect")
         return {"id": "mock-trace-id-default-side-effect"}
 
     with patch.object(rm_client, '_log_trace') as mock_log_trace_local:
@@ -37,7 +37,7 @@ def test_openai_wrapper_logs_trace_by_default(ragmetrics_test_client: RagMetrics
         if not test_mock:
             if rm_client.logging_off:
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0
+                assert len(rm_client.trace_ids) == 0
             else:
                 mock_log_trace_local.assert_called_once()
                 log_args, log_kwargs = mock_log_trace_local.call_args
@@ -46,9 +46,9 @@ def test_openai_wrapper_logs_trace_by_default(ragmetrics_test_client: RagMetrics
                 # No client metadata, no call metadata, only model is dynamic
                 assert log_kwargs['metadata_llm'] == {"model": "gpt-default-test"} 
                 assert log_kwargs['model_name'] == "gpt-default-test"
-                assert len(rm_client.test_logged_trace_ids) == 1
+                assert len(rm_client.trace_ids) == 1
         else: 
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0
+            assert len(rm_client.trace_ids) == 0
     
     rm_client.metadata = original_client_meta # Restore 

@@ -14,7 +14,7 @@ def test_openai_wrapper_when_logging_off(ragmetrics_test_client: RagMetricsClien
     # Ensure logging is explicitly OFF for this test, overriding fixture's potential state
     original_logging_off_state = rm_client.logging_off
     rm_client.logging_off = True
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
 
@@ -30,7 +30,7 @@ def test_openai_wrapper_when_logging_off(ragmetrics_test_client: RagMetricsClien
 
         # The real _log_trace should be called, but it should not call _make_request
         mock_make_request_on_logged_off_client.assert_not_called()
-        assert len(rm_client.test_logged_trace_ids) == 0 # No IDs should be logged
+        assert len(rm_client.trace_ids) == 0 # No IDs should be logged
 
     # Restore original logging_off state from fixture to avoid affecting other tests
     rm_client.logging_off = original_logging_off_state 

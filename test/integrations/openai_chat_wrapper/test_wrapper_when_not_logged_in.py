@@ -17,7 +17,7 @@ def test_openai_wrapper_when_not_logged_in(mock_openai_completions_object, monke
     rm_client_not_logged_in.logging_off = False # Ensure logging is ON for the check to matter
 
     if hasattr(rm_client_not_logged_in, 'test_logged_trace_ids'): 
-        rm_client_not_logged_in.test_logged_trace_ids = []
+        rm_client_not_logged_in.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
 
@@ -34,4 +34,4 @@ def test_openai_wrapper_when_not_logged_in(mock_openai_completions_object, monke
         # The real _log_trace should be called by the wrapper, but it should not call _make_request
         mock_make_request_on_unauth_client.assert_not_called()
         # test_logged_trace_ids would also be empty as _make_request (which returns the ID) isn't called.
-        assert len(rm_client_not_logged_in.test_logged_trace_ids) == 0 
+        assert len(rm_client_not_logged_in.trace_ids) == 0 

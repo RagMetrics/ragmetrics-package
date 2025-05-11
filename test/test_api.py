@@ -463,7 +463,7 @@ def test_log_trace_when_not_logged_in(monkeypatch): # Updated: no mock_request n
 
     # Ensure test_logged_trace_ids is clean
     if hasattr(client, 'test_logged_trace_ids'):
-        client.test_logged_trace_ids = []
+        client.trace_ids = []
 
     # We expect _make_request not to be called because logged_in is False
     with patch.object(client, '_make_request') as mock_make_request:
@@ -474,7 +474,7 @@ def test_log_trace_when_not_logged_in(monkeypatch): # Updated: no mock_request n
             callback_result=default_callback([{"role": "user", "content": "no log due to no auth"}], "this won\'t be logged due to no auth")
         )
         mock_make_request.assert_not_called()
-        assert len(client.test_logged_trace_ids) == 0
+        assert len(client.trace_ids) == 0
 
 # --- Tests for RagMetricsClient.monitor and global monitor --- 
 

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 # Imports needed for the moved fixtures/class
 from unittest.mock import MagicMock
 import requests
-from ragmetrics.api import RagMetricsObject
+from ragmetrics.base_object import RagMetricsObject
 
 # --- Moved from test_ragmetrics_object.py ---
 
@@ -56,6 +56,26 @@ def mock_api_failure():
 # --- End Moved Code ---
 
 @pytest.fixture(scope="session")
+def openai_api_key():
+    """
+    Load the OpenAI API key from the environment
+    
+    This fixture will:
+    1. Load the .env file from the project root
+    2. Check for and return the OPENAI_API_KEY environment variable
+    3. Skip tests if the API key is not available
+    
+    Returns:
+        str: The OpenAI API key
+    """
+    # Load .env file from the root of the ragmetrics-package 
+    api_key = os.environ.get('OPENAI_API_KEY', None)
+    if not api_key:
+        pytest.skip("OPENAI_API_KEY not found in .env file or environment variables")
+        
+    return api_key
+
+@pytest.fixture(scope="session")
 def ragmetrics_test_client():
     """
     Initializes and configures the RagMetrics client for the test session.
@@ -76,7 +96,7 @@ def ragmetrics_test_client():
     
     # Ensure test_logged_trace_ids is clean for this session/test usage
     if hasattr(client, 'test_logged_trace_ids'):
-        client.test_logged_trace_ids = [] 
+        client.trace_ids = [] 
 
     if test_mock:
         ragmetrics.login(off=True) # This modifies the global client

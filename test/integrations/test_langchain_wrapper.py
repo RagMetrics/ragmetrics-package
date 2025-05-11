@@ -8,7 +8,7 @@ from typing import Tuple, Dict, Any
 import logging # Import logging
 
 # Modules to test
-from ragmetrics.api import RagMetricsClient
+from ragmetrics.client import RagMetricsClient
 from ragmetrics.client_integrations.langchain_wrapper import wrap_langchain_invoke
 from ragmetrics.utils import default_callback
 

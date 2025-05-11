@@ -10,7 +10,7 @@ from ragmetrics.utils import default_callback
 # Test wrapper behavior with streaming responses
 def test_openai_wrapper_streaming_logs_correctly(ragmetrics_test_client: RagMetricsClient, mock_openai_completions_object):
     rm_client = ragmetrics_test_client
-    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.test_logged_trace_ids = []
+    if hasattr(rm_client, 'test_logged_trace_ids'): rm_client.trace_ids = []
 
     completions_obj, original_create_mock = mock_openai_completions_object
 
@@ -25,7 +25,7 @@ def test_openai_wrapper_streaming_logs_correctly(ragmetrics_test_client: RagMetr
 
     def mock_log_trace_side_effect_streaming(*args, **kwargs):
         if hasattr(rm_client, 'test_logged_trace_ids'):
-            rm_client.test_logged_trace_ids.append("mock-trace-id-streaming-side-effect")
+            rm_client.trace_ids.append("mock-trace-id-streaming-side-effect")
         # Potentially assert something about the nature of the 'response' kwarg if it's a stream placeholder
         return {"id": "mock-trace-id-streaming-side-effect"}
 
@@ -50,14 +50,14 @@ def test_openai_wrapper_streaming_logs_correctly(ragmetrics_test_client: RagMetr
         if not test_mock:
             if rm_client.logging_off:
                 mock_log_trace_local.assert_not_called()
-                assert len(rm_client.test_logged_trace_ids) == 0
+                assert len(rm_client.trace_ids) == 0
             else:
                 mock_log_trace_local.assert_called_once()
                 log_args, log_kwargs = mock_log_trace_local.call_args
                 assert log_kwargs['input_messages'] == input_messages
                 assert log_kwargs['response'] == "original_response" # Assembled or final response
                 assert log_kwargs['metadata_llm']["stream"] is True # stream=True should be in metadata
-                assert len(rm_client.test_logged_trace_ids) == 1
+                assert len(rm_client.trace_ids) == 1
         else: 
             mock_log_trace_local.assert_not_called()
-            assert len(rm_client.test_logged_trace_ids) == 0 
+            assert len(rm_client.trace_ids) == 0 
