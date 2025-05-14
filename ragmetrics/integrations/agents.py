@@ -12,7 +12,7 @@ import json
 import time
 import logging
 from typing import Optional, Dict, Any, Union, List
-from ragmetrics.api import ragmetrics_client
+from ragmetrics.api import ragmetrics_client, default_callback
 
 class RagMetricsTracingProcessor(TracingProcessor):
     """A TracingProcessor that sends agent spans to RagMetrics."""
@@ -125,16 +125,19 @@ class RagMetricsTracingProcessor(TracingProcessor):
                 metadata = {"agent_sdk": True}
             else:
                 metadata["agent_sdk"] = True
+            
+            # Use the default_callback to process inputs and outputs
+            callback_result = default_callback(input_messages, response)
                 
             # Call _log_trace with all required parameters to avoid NoneType errors
             ragmetrics_client._log_trace(
                 input_messages=input_messages,
                 response=response,
                 metadata_llm=metadata,
-                callback_result={},  # Empty dict, not None
-                contexts=[],         # Empty list, not None
-                tools=[],            # Empty list, not None
-                duration=0.0         # Default duration
+                callback_result=callback_result,  # Use processed callback result
+                contexts=[],                      # Empty list, not None
+                tools=[],                         # Empty list, not None
+                duration=0.0                      # Default duration
             )
             return True
         except Exception as e:

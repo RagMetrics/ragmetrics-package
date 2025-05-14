@@ -259,7 +259,7 @@ class RagMetricsClient:
         self.base_url = 'https://ragmetrics.ai'
         self.logging_off = False
         self.metadata = None
-        self.conversation_id = str(uuid.uuid4())
+        self.conversation_id = self.new_conversation()
     
     def new_conversation(self, id: Optional[str] = None):
         """
@@ -273,6 +273,7 @@ class RagMetricsClient:
             id: Optional custom conversation ID. If not provided, a new UUID will be generated.
         """
         self.conversation_id = id if id is not None else str(uuid.uuid4())
+        return self.conversation_id
 
     def _find_external_caller(self) -> str:
         """
@@ -540,13 +541,32 @@ class RagMetricsClient:
                 setattr(client, "invoke", wrapper_func)
             else:
                 client.invoke = types.MethodType(wrapper_func, client)
+                
+        elif client_type == 'completion':
+            if isinstance(client, type):
+                setattr(client, "completion", wrapper_func)
+            else:
+                client.completion = types.MethodType(wrapper_func, client)
 
         elif client_type == 'runner':
-            from agents import Runner
-            orig_run = Runner.run
-            # Patch Runner with OpenTelemetry tracing using monitor_openai_agents
-            from ragmetrics.integrations.openai_agents import monitor_openai_agents
-            monitor_openai_agents(Runner)
+            # For the Runner class, we need to create an async OpenAI client and use monitor_agents
+            try:
+                # Import the necessary modules
+                from agents import Runner
+                from openai import AsyncOpenAI
+                from ragmetrics.integrations.agents import monitor_agents
+                
+                # Create an async OpenAI client with the API key from environment
+                import os
+                api_key = os.getenv("OPENAI_API_KEY")
+                async_client = AsyncOpenAI(api_key=api_key)
+                
+                # Use monitor_agents with the async client
+                print("Monitoring Runner class with agents integration")
+                monitor_agents(async_client)
+            except Exception as e:
+                print(f"Error setting up Runner monitoring: {e}")
+            
             return client
 
     def _generate_wrapper(self, client_type, orig_invoke, callback, client=None):
