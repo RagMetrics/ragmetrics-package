@@ -552,14 +552,11 @@ class RagMetricsClient:
             # For the Runner class, we need to create an async OpenAI client and use monitor_agents
             try:
                 # Import the necessary modules
-                from agents import Runner
                 from openai import AsyncOpenAI
                 from ragmetrics.integrations.agents import monitor_agents
                 
                 # Create an async OpenAI client with the API key from environment
-                import os
-                api_key = os.getenv("OPENAI_API_KEY")
-                async_client = AsyncOpenAI(api_key=api_key)
+                async_client = AsyncOpenAI()
                 
                 # Use monitor_agents with the async client
                 print("Monitoring Runner class with agents integration")
