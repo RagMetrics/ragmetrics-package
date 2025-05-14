@@ -333,7 +333,17 @@ class RagMetricsClient:
     Returns:
             Response: The API response from logging the trace.
         """
+        print("[DEBUG] _log_trace called:")
+        print("  input_messages:", input_messages)
+        print("  response:", response)
+        print("  metadata_llm:", metadata_llm)
+        print("  contexts:", contexts)
+        print("  expected:", expected)
+        print("  duration:", duration)
+        print("  callback_result:", callback_result)
+        print("  kwargs:", kwargs)
         if self.logging_off:
+            print("[DEBUG] Logging is off; skipping trace log.")
             return
 
         if not self.access_token:
@@ -383,7 +393,7 @@ class RagMetricsClient:
 
         # Process callback_result if provided
         for key in ["input", "output", "expected"]:
-            if key in callback_result:
+            if callback_result and key in callback_result:
                 payload[key] = callback_result[key]
 
         # Serialize
@@ -476,23 +486,22 @@ class RagMetricsClient:
         Raises:
             ValueError: If client type is not supported
         """
-        # Check for OpenAI Agents SDK - Agent object
-        if hasattr(client, "name") and hasattr(client, "instructions") and hasattr(client, "model"):
-            try:
-                from agents import Agent
-                if isinstance(client, Agent):
-                    return 'agent', None
-            except ImportError:
-                pass
+        # Detect OpenAI Agents SDK- Runner object
+        try:
+            from agents import Runner
+            if client is Runner or isinstance(client, Runner):
+                # Runner instrumentation handled in _apply_client_wrapper
+                return 'runner', None
+        except ImportError:
+            pass
             
-        # Check for OpenAI Agents SDK - Runner
-        if hasattr(client, "run") and hasattr(client, "run_sync") and hasattr(client, "run_streamed"):
-            try:
-                from agents import Runner
-                if client == Runner:
-                    return 'runner', client.run
-            except ImportError:
-                pass
+        # Detect OpenAI Agents SDK - Agent object
+        try:
+            from agents import Agent
+            if isinstance(client, Agent):
+                return 'agent', None
+        except ImportError:
+            pass
             
         # OpenAI-style clients
         if hasattr(client, "chat") and hasattr(client.chat.completions, 'create'):
@@ -509,38 +518,6 @@ class RagMetricsClient:
         else:
             raise ValueError("Unsupported client type")
     
-    def _get_input_from_client_call(self, client_type, args, kwargs):
-        """
-        Extract input messages from client-specific call patterns.
-        
-        Args:
-            client_type: Type of client ('openai', 'invoke', 'completion', 'agent', 'runner')
-            args: Positional arguments passed to the client call
-            kwargs: Keyword arguments passed to the client call
-            
-        Returns:
-            The input messages in the appropriate format for the client type
-        """
-        if client_type in ['openai', 'completion']:
-            return kwargs.get('messages')
-        elif client_type == 'invoke':
-            input_messages = kwargs.get('input')
-            if input_messages is None and len(args) > 1:
-                input_messages = args[1]
-            return input_messages
-        elif client_type == 'runner':
-            # For Runner.run, args[1] is the input, which can be str, Message, or list[Message]
-            if len(args) > 1:
-                # Format the input into a consistent structure
-                input_val = args[1]
-                if isinstance(input_val, str):
-                    return [{"role": "user", "content": input_val}]
-                # Input could be a Message object or list of Messages
-                # We'll assume the Runner.run method handles these formats correctly
-                return input_val
-            return kwargs.get('input')
-        return None
-
     def _apply_client_wrapper(self, client, client_type, orig_invoke, wrapper_func):
         """
         Apply the wrapper function to the appropriate method of the client.
@@ -557,34 +534,46 @@ class RagMetricsClient:
         if client_type == 'openai':
             client.chat.completions.create = \
                 types.MethodType(wrapper_func, client.chat.completions)
+
         elif client_type == 'invoke':
             if isinstance(client, type):
                 setattr(client, "invoke", wrapper_func)
             else:
                 client.invoke = types.MethodType(wrapper_func, client)
-        elif client_type == 'completion':
-            client.completion = wrapper_func
+
         elif client_type == 'runner':
-            # For the Runner class, we need to patch all run methods
             from agents import Runner
-            # Store original methods
             orig_run = Runner.run
-            orig_run_sync = Runner.run_sync
-            orig_run_streamed = Runner.run_streamed
+            # Patch Runner with OpenTelemetry tracing using monitor_openai_agents
+            from ragmetrics.integrations.openai_agents import monitor_openai_agents
+            monitor_openai_agents(Runner)
+            return client
+
+    def _generate_wrapper(self, client_type, orig_invoke, callback, client=None):
+        """
+        Create a wrapper function for various LLM client types.
+        
+        Args:
+            client_type: Type of wrapper to generate ('openai', 'invoke', 'completion', 'runner')
+            orig_invoke: Original method being wrapped
+            callback: Callback function to process results
+            client: Client object (required for OpenAI wrappers)
             
-            # Patch the async run method
-            Runner.run = lambda *args, **kwargs: self._openai_agent_async_wrapper(orig_run, *args, **kwargs)
-            
-            # Create unified wrapper for run_sync
-            # Use _unified_wrapper for run_sync, but with client_type="runner_sync"
-            Runner.run_sync = lambda *args, **kwargs: self._unified_sync_generation_wrapper(
-                'runner_sync', orig_run_sync, None, *args, **kwargs
+        Returns:
+            A wrapper function for the specified client type
+        """
+        if client_type == 'openai':
+            return lambda self_instance, *args, **kwargs: self._unified_sync_generation_wrapper(
+                client_type, orig_invoke, callback, client, self_instance, *args, **kwargs
             )
-            
-            # Patch run_streamed
-            Runner.run_streamed = lambda *args, **kwargs: self._openai_agent_async_streamed_wrapper(orig_run_streamed, *args, **kwargs)
-            
-        return client
+        elif client_type == 'runner':
+            # For the Runner class, we need to handle this in _apply_client_wrapper directly
+            # as it needs to be an async function
+            return None
+        else:
+            return lambda *args, **kwargs: self._unified_sync_generation_wrapper(
+                client_type, orig_invoke, callback, *args, **kwargs
+            )
 
     def _unified_sync_generation_wrapper(self, client_type, orig_invoke, callback, *args, **kwargs):
         """
@@ -745,31 +734,40 @@ class RagMetricsClient:
         
         return response
 
-    def _generate_wrapper(self, client_type, orig_invoke, callback, client=None):
+    def _get_input_from_client_call(self, client_type, args, kwargs):
         """
-        Create a wrapper function for various LLM client types.
+        Extract input messages from client-specific call patterns.
         
         Args:
-            client_type: Type of wrapper to generate ('openai', 'invoke', 'completion', 'runner')
-            orig_invoke: Original method being wrapped
-            callback: Callback function to process results
-            client: Client object (required for OpenAI wrappers)
+            client_type: Type of client ('openai', 'invoke', 'completion', 'agent', 'runner')
+            args: Positional arguments passed to the client call
+            kwargs: Keyword arguments passed to the client call
             
         Returns:
-            A wrapper function for the specified client type
+            The input messages in the appropriate format for the client type
         """
-        if client_type == 'openai':
-            return lambda self_instance, *args, **kwargs: self._unified_sync_generation_wrapper(
-                client_type, orig_invoke, callback, client, self_instance, *args, **kwargs
-            )
+        if client_type in ['openai', 'completion']:
+            return kwargs.get('messages')
+
+        elif client_type == 'invoke':
+            input_messages = kwargs.get('input')
+            if input_messages is None and len(args) > 1:
+                input_messages = args[1]
+            return input_messages
+
         elif client_type == 'runner':
-            # For Runner.run, we need to handle this in _apply_client_wrapper directly
-            # as it needs to be an async function
-            return None
-        else:
-            return lambda *args, **kwargs: self._unified_sync_generation_wrapper(
-                client_type, orig_invoke, callback, *args, **kwargs
-            )
+            # For Runner.run, args[1] is the input, which can be str, Message, or list[Message]
+            if len(args) > 1:
+                # Format the input into a consistent structure
+                input_val = args[1]
+                if isinstance(input_val, str):
+                    return [{"role": "user", "content": input_val}]
+                # Input could be a Message object or list of Messages
+                # We'll assume the Runner.run method handles these formats correctly
+                return input_val
+            return kwargs.get('input')
+            
+        return None
 
     def monitor(self, client, metadata, callback: Optional[Callable[[Any, Any], dict]] = None):
         """
@@ -812,11 +810,11 @@ class RagMetricsClient:
 
         # Detect client type and get original invoke method
         client_type, orig_invoke = self._detect_client_type(client)
-        
+
         # Generate appropriate wrapper based on client type
         wrapper_func = self._generate_wrapper(client_type, orig_invoke, callback, client)
-        
-        # Apply the wrapper to the client
+
+        # Apply the wrapper (handles runner internally)
         self._apply_client_wrapper(client, client_type, orig_invoke, wrapper_func)
         
         return client
