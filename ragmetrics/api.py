@@ -334,17 +334,7 @@ class RagMetricsClient:
     Returns:
             Response: The API response from logging the trace.
         """
-        print("[DEBUG] _log_trace called:")
-        print("  input_messages:", input_messages)
-        print("  response:", response)
-        print("  metadata_llm:", metadata_llm)
-        print("  contexts:", contexts)
-        print("  expected:", expected)
-        print("  duration:", duration)
-        print("  callback_result:", callback_result)
-        print("  kwargs:", kwargs)
         if self.logging_off:
-            print("[DEBUG] Logging is off; skipping trace log.")
             return
 
         if not self.access_token:
@@ -372,6 +362,7 @@ class RagMetricsClient:
             union_metadata.update(metadata_llm)
 
         tools = kwargs.get('tools', None)
+        conversation_id = kwargs.get('conversation_id', self.conversation_id)
 
         # Construct the payload with placeholders for callback result
         payload = {
@@ -389,7 +380,7 @@ class RagMetricsClient:
             "input": None,
             "output": None,
             "scores": None,
-            "conversation_id": self.conversation_id
+            "conversation_id": conversation_id
         }
 
         # Process callback_result if provided
@@ -549,17 +540,11 @@ class RagMetricsClient:
                 client.completion = types.MethodType(wrapper_func, client)
 
         elif client_type == 'runner':
-            # For the Runner class, we need to create an async OpenAI client and use monitor_agents
-            try:
-                # Import the necessary modules
+            # Monitor OpenAI Async client as foundation for Agent SDK
+            try:                
                 from openai import AsyncOpenAI
                 from ragmetrics.integrations.agents import monitor_agents
-                
-                # Create an async OpenAI client with the API key from environment
                 async_client = AsyncOpenAI()
-                
-                # Use monitor_agents with the async client
-                print("Monitoring Runner class with agents integration")
                 monitor_agents(async_client)
             except Exception as e:
                 print(f"Error setting up Runner monitoring: {e}")
@@ -584,8 +569,6 @@ class RagMetricsClient:
                 client_type, orig_invoke, callback, client, self_instance, *args, **kwargs
             )
         elif client_type == 'runner':
-            # For the Runner class, we need to handle this in _apply_client_wrapper directly
-            # as it needs to be an async function
             return None
         else:
             return lambda *args, **kwargs: self._unified_sync_generation_wrapper(

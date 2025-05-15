@@ -1,6 +1,4 @@
-import os
 import ragmetrics
-from openai import OpenAI
 from agents import Agent, Runner, function_tool
 
 #load .env
@@ -9,8 +7,6 @@ load_dotenv('.env')
 
 # 1. Configure RagMetrics and monitor the agents Runner
 ragmetrics.login()
-
-# Monitor the Runner class - this will internally configure the agents SDK
 ragmetrics.monitor(Runner)
 
 # 2. Define your tools and agents as usual
