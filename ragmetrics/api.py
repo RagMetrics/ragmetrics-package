@@ -504,6 +504,38 @@ class RagMetricsClient:
             return True
         raise ValueError("Invalid access token. Please get a new one at RagMetrics.ai.")
 
+    def _get_input_from_client_call(self, client_type, args, kwargs):
+        """
+        Extract input messages from client-specific call patterns.
+        
+        Args:
+            client_type: Type of client ('openai', 'invoke', 'completion', 'agent', 'runner')
+            args: Positional arguments passed to the client call
+            kwargs: Keyword arguments passed to the client call
+            
+        Returns:
+            The input messages in the appropriate format for the client type
+        """
+        if client_type in ['openai', 'completion']:
+            return kwargs.get('messages')
+        elif client_type == 'invoke':
+            input_messages = kwargs.get('input')
+            if input_messages is None and len(args) > 1:
+                input_messages = args[1]
+            return input_messages
+        elif client_type == 'runner':
+            # For Runner.run, args[1] is the input, which can be str, Message, or list[Message]
+            if len(args) > 1:
+                # Format the input into a consistent structure
+                input_val = args[1]
+                if isinstance(input_val, str):
+                    return [{"role": "user", "content": input_val}]
+                # Input could be a Message object or list of Messages
+                # We'll assume the Runner.run method handles these formats correctly
+                return input_val
+            return kwargs.get('input')
+        return None
+
     def _detect_client_type(self, client):
         """
         Detect the type of LLM client.
@@ -551,7 +583,13 @@ class RagMetricsClient:
         else:
             raise ValueError("Unsupported client type")
     
-    def _apply_client_wrapper(self, client, client_type, orig_invoke, wrapper_func):
+    def _apply_client_wrapper(
+            self,
+            client,
+            client_type,
+            orig_invoke,
+            wrapper_func
+        ):
         """
         Apply the wrapper function to the appropriate method of the client.
         
@@ -592,7 +630,13 @@ class RagMetricsClient:
             
             return client
 
-    def _generate_wrapper(self, client_type, orig_invoke, callback, client=None):
+    def _generate_wrapper(
+        self,
+        client_type,
+        orig_invoke,
+        callback,
+        client=None
+    ):
         """
         Create a wrapper function for various LLM client types.
         
@@ -611,12 +655,24 @@ class RagMetricsClient:
             )
         elif client_type == 'runner':
             return None
+        elif client_type == 'completion':
+            # Special handling for LiteLLM completion
+            return lambda *args, **kwargs: self._unified_sync_generation_wrapper(
+                client_type, orig_invoke, callback, *args, **kwargs
+            )
         else:
             return lambda *args, **kwargs: self._unified_sync_generation_wrapper(
                 client_type, orig_invoke, callback, *args, **kwargs
             )
 
-    def _unified_sync_generation_wrapper(self, client_type, orig_invoke, callback, *args, **kwargs):
+    def _unified_sync_generation_wrapper(
+        self,
+        client_type,
+        orig_invoke,
+        callback,
+        *args,
+        **kwargs
+    ):
         """
         Unified wrapper method for all types of LLM API calls.
         
@@ -631,10 +687,14 @@ class RagMetricsClient:
             The response from the original method
         """
         # Extract RagMetrics-specific fields
-        if client_type == 'litellm':
+        if client_type == 'completion':
             # litellm also accepts a metadata argument
-            # so retain a copy in kwargs
-            metadata_llm = kwargs.get('metadata', None)
+            # so retain a copy in kwargs            
+            if 'metadata' in kwargs:
+                metadata_llm = kwargs['metadata'].copy()
+                del kwargs['metadata']
+            else:
+                metadata_llm = None
         else:
             metadata_llm = kwargs.pop('metadata', None)
         
@@ -642,15 +702,37 @@ class RagMetricsClient:
         expected = kwargs.pop('expected', None)
         
         # Execute client-specific generation
-        start_time = time.time()        
+        start_time = time.time()
         if client_type == 'openai':
             client, self_instance, *invoke_args = args
             response = orig_invoke(self_instance, *invoke_args, **kwargs)
+        
+        elif client_type == 'completion':
+            # For LiteLLM, we need to ensure we're not passing the model parameter twice
+            # or passing the module itself as the model parameter
+            
+            # If first arg is litellm module itself, remove it
+            if len(args) > 0 and hasattr(args[0], '__name__') and args[0].__name__ == 'litellm':
+                args = args[1:]
+                response = orig_invoke(*args, **kwargs)
+
+            # If model is in both args and kwargs, remove it from kwargs
+            elif len(args) > 0 and 'model' in kwargs:
+                kwargs.pop('model', None)
+                response = orig_invoke(*args, **kwargs)
+
+            # Vanila completion
+            else:
+                response = orig_invoke(*args, **kwargs)
         else:
             response = orig_invoke(*args, **kwargs)
 
         duration = time.time() - start_time
-            
+
+        # Process and log the interaction
+        input_messages = \
+            self._get_input_from_client_call(client_type, args, kwargs)        
+
         cb_result = callback(input_messages, response)
         
         self._log_trace(
