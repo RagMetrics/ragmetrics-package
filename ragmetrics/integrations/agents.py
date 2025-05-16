@@ -2,10 +2,33 @@
 Integration with OpenAI Agents SDK for RagMetrics.
 """
 
-import ragmetrics
-from agents.tracing.processor_interface import TracingProcessor
-from agents import set_trace_processors
+import iso8601
+from typing import Any
+# Import client and callback from api without importing the full ragmetrics
 from ragmetrics.api import ragmetrics_client, default_callback
+
+# Define TracingProcessor as a base class in case import fails
+class TracingProcessor:
+    """Base class if agents SDK is not installed"""
+    def on_trace_start(self, trace): pass
+    def on_span_start(self, span): pass
+    def on_span_end(self, span): pass
+    def on_trace_end(self, trace): pass
+    def shutdown(self): pass
+    def force_flush(self): pass
+
+# Try to import agents SDK
+try:
+    from agents.tracing.processor_interface import TracingProcessor
+    from agents import set_trace_processors
+    AGENTS_SDK_AVAILABLE = True
+except ImportError:
+    # Define a simple function for when agents SDK is not available
+    def set_trace_processors(processors):
+        """Fallback function when agents SDK is not available"""
+        print("Warning: agents SDK not available, tracing will not work")
+    AGENTS_SDK_AVAILABLE = False
+
 
 class RagMetricsTracingProcessor(TracingProcessor):
     """A TracingProcessor that sends agent spans to RagMetrics."""
@@ -29,121 +52,146 @@ class RagMetricsTracingProcessor(TracingProcessor):
 
     def on_span_end(self, span):
         """Called when a span ends (operation completes)."""
+        # Raw IO
         try:
-            # Extract input_messages and response from span
-            input_messages, response = self.extract_raw_io_from_span(span)
+            raw_input = span.span_data.input
+        except:
+            raw_input = None        
+        raw_output = self._to_dict(span)
 
-            try:
-                span_type = span.span_data.type
-            except:
-                span_type = "unknown"
-            
-            # Serialize span to JSON
-            json_data = self.serialize_span_to_json(span)
-            
-            # Create metadata
-            metadata = {
-                "agent_sdk": True,
-                "trace_id": self.trace_id,
-                "span_type": span_type
-            }
-            metadata.update(json_data)
-            
-            callback_result = default_callback(input_messages, response)
-            
-            #Log to RagMetrics
-            try:
-                ragmetrics_client._log_trace(
-                    input_messages=input_messages,
-                    response=response,
-                    metadata_llm=metadata,
-                    callback_result=callback_result,
-                    conversation_id=self.conversation_id,
-                    duration=0.0
-                )
-            except Exception as e:
-                print(f"Error logging span: {e}")
+        # Formatted IO
+        # TODO: Support alternative callbacks from .monitor()
+        callback_result = default_callback(raw_input, raw_output)
+        
+        # Duration
+        end_time = iso8601.parse_date(span.ended_at)
+        start_time = iso8601.parse_date(span.started_at)
+        duration = (end_time - start_time).total_seconds()
+        
+        #Log to RagMetrics
+        ragmetrics_client._log_trace(
+            input_messages=raw_input,
+            response=raw_output,
+            callback_result=callback_result,
+            conversation_id=self.conversation_id,
+            duration=duration
+        )
 
-        except Exception as e:
-            print(f"Error in on_span_end: {e}")
-
-    def serialize_trace_to_json(self, trace):
-        """Convert a trace object to a JSON-serializable dictionary.
+    def _to_dict(self, obj: Any, visited=None) -> Any:
+        """Convert an object to a JSON-serializable dictionary.
         
         Args:
-            trace: The trace object to serialize
-            
-        Returns:
-            dict: A JSON-serializable dictionary representing the trace
-        """
-        if trace is None:
-            return {}
-            
-        trace_data = {
-            "trace_id": str(getattr(trace, "trace_id", "unknown")),
-            "name": str(getattr(trace, "name", "unknown")),
-            "event_type": "trace"
-        }
-        
-        # Add any other trace attributes that might be useful
-        for attr in ["status", "start_time", "end_time", "parent_id"]:
-            if hasattr(trace, attr):
-                trace_data[attr] = str(getattr(trace, attr))
+            obj: The object to serialize
+            visited: Set of object IDs to detect circular references
                 
-        return trace_data
-    
-    def serialize_span_to_json(self, span):
-        """Convert a span object to a JSON-serializable dictionary.
-        
-        Args:
-            span: The span object to serialize
-            
         Returns:
-            dict: A JSON-serializable dictionary representing the span
+            A JSON-serializable representation of the input object
         """
-        if span is None:
-            return {}
+        if visited is None:
+            visited = set()
 
-        # Get all span attributes from __dict__
-        span_attrs = {}
-        for k, v in span.__dict__.items():
-            if not k.startswith("_"):
+        # Handle None
+        if obj is None:
+            return None
+            
+        # Handle circular references
+        obj_id = id(obj)
+        if obj_id in visited:
+            return f"<circular ref id={obj_id}>"
+        visited.add(obj_id)
+
+        # Handle basic types
+        if isinstance(obj, (str, int, float, bool)):
+            return obj
+            
+        # Handle datetime objects
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+
+        # Handle containers
+        if isinstance(obj, (list, tuple, set)):
+            return [self._to_dict(x, visited) for x in obj]
+            
+        if isinstance(obj, dict):
+            return {k: self._to_dict(v, visited) for k, v in obj.items()}
+
+        # Handle span objects specially
+        if hasattr(obj, 'span_data') or hasattr(obj, 'started_at') or hasattr(obj, 'ended_at'):
+            result = {'type': type(obj).__name__}
+            
+            # Get all attributes of the span
+            for attr_name in dir(obj):
+                if attr_name.startswith('_') or callable(getattr(obj, attr_name)):
+                    continue
+                    
                 try:
-                    # Try to convert to string, but handle potential serialization issues
-                    span_attrs[k] = str(v)
-                except:
-                    span_attrs[k] = repr(v)
-        
-        # Create base span data
-        span_data = {
-            "span_id": str(getattr(span, "span_id", "unknown")),
-            "event_type": "span"
-        }
-        
-        # Add span attributes to the data
-        span_data.update(span_attrs)
-        
-        # Get span_data attributes if available
-        if hasattr(span, "span_data"):
+                    attr_value = getattr(obj, attr_name)
+                    if attr_value is not None:
+                        result[attr_name] = self._to_dict(attr_value, visited)
+                except Exception as e:
+                    result[f'error_serializing_{attr_name}'] = str(e)
+            
+            # Special handling for span_data to ensure we capture everything
+            if hasattr(obj, 'span_data'):
+                try:
+                    span_data = obj.span_data
+                    if span_data is not None:
+                        # First get all attributes from __dict__ if available
+                        if hasattr(span_data, '__dict__'):
+                            result['span_data'] = {}
+                            for k, v in vars(span_data).items():
+                                if not k.startswith('_') and v is not None:
+                                    result['span_data'][k] = self._to_dict(v, visited)
+                        
+                        # Then ensure we get any properties that might not be in __dict__
+                        for attr_name in dir(span_data):
+                            if (not attr_name.startswith('_') and 
+                                not callable(getattr(span_data, attr_name)) and 
+                                attr_name not in result.get('span_data', {})):
+                                try:
+                                    val = getattr(span_data, attr_name)
+                                    if val is not None:
+                                        if 'span_data' not in result:
+                                            result['span_data'] = {}
+                                        result['span_data'][attr_name] = self._to_dict(val, visited)
+                                except Exception:
+                                    continue
+                except Exception as e:
+                    result['span_data_error'] = str(e)
+            
+            return result
+
+        # Handle other objects with __dict__
+        if hasattr(obj, '__dict__'):
             try:
-                sd = span.span_data
-                span_data["type"] = getattr(sd, "type", "unknown")
-                
-                # Add span_data attributes
-                sd_attrs = {}
-                for k, v in sd.__dict__.items():
-                    if not k.startswith("_"):
-                        try:
-                            # Prefix with sd_ to avoid conflicts with span attributes
-                            sd_attrs[f"sd_{k}"] = str(v)
-                        except:
-                            sd_attrs[f"sd_{k}"] = repr(v)
-                            
-                span_data.update(sd_attrs)
-            except Exception as e:
-                span_data["sd_error"] = str(e)
-        
-        return span_data
+                obj_dict = {}
+                for k, v in vars(obj).items():
+                    if not k.startswith('_') and v is not None:
+                        obj_dict[k] = self._to_dict(v, visited)
+                return {'type': type(obj).__name__, **obj_dict}
+            except Exception:
+                pass
+
+        # Handle objects with __slots__
+        slots = getattr(type(obj), "__slots__", None)
+        if slots:
+            data = {}
+            for slot in slots:
+                if isinstance(slot, str) and hasattr(obj, slot):
+                    try:
+                        val = getattr(obj, slot)
+                        if val is not None:
+                            data[slot] = self._to_dict(val, visited)
+                    except Exception:
+                        continue
+            if data:
+                return {'type': type(obj).__name__, **data}
+
+        # For any other type, try to get its string representation
+        try:
+            return str(obj)
+        except Exception:
+            return f'<unserializable {type(obj).__name__}>'
 
     def extract_messages_from_trace(self, trace):
         """Extract input messages and response from a trace object.
@@ -178,7 +226,7 @@ class RagMetricsTracingProcessor(TracingProcessor):
         try:
             raw_output = span.span_data.response
         except:
-            raw_output = None
+            raw_output = span.export()
         
         return raw_input, raw_output
 
@@ -207,12 +255,18 @@ def monitor_agents(openai_client=None):
     
     Args:
         openai_client: Optional OpenAI or AsyncOpenAI client instance to set as default
-        ragmetrics_key: Optional RagMetrics API key for authentication
         
     Returns:
         The configured tracing processor or None if setup failed
     """
+    if not AGENTS_SDK_AVAILABLE:
+        print("OpenAI Agents SDK is not installed. Please install with pip install openai-agents")
+        return None
+
     try:
+        # Import here to avoid circular import
+        import ragmetrics
+        
         # Determine if we have an async or sync client
         client_type = str(type(openai_client).__name__)
         is_async_client = "Async" in client_type

@@ -26,17 +26,20 @@ def default_input(raw_input):
     Returns:
         str: Formatted string representation of the input, or None if input is empty.
     """
-    # Input processing
+    # OpenAI Completions API, Multiple Messages
     if isinstance(raw_input, list) and len(raw_input) > 0:
         raw_input = raw_input[-1]
     
+    # OpenAI Completions API, Single Message
     if isinstance(raw_input, dict) and "content" in raw_input:
-        content = raw_input.get('content', '')
+        return raw_input.get('content', '')
+
     elif hasattr(raw_input, "content"):
-        content = raw_input.content
+        return raw_input.content
+    
+    
     else:
-        content = str(raw_input)
-    return content
+        return str(raw_input)
 
 def default_output(raw_response):
     """
@@ -74,8 +77,30 @@ def default_output(raw_response):
                     return f"={func_name}({args_str})"
         except Exception as e:
             logger.error("Error formatting tool_calls from response: %s", e)
-            
-    # Also handle object-style responses (OpenAI client library)
+
+    #OpenAI Response API (Used on Agent SDK)    
+    try:
+        from openai.types.responses.response import Response
+        assert isinstance(raw_response, Response)
+        assert raw_response.output[0].type=="function_call"
+        response_api_function_call = True
+    except Exception as e:
+        response_api_function_call = False
+    
+    if response_api_function_call:
+        functions_called = []
+        for res in raw_response.output:                
+            func_name = res.name
+            args_dict = json.loads(res.arguments)
+            args_str = ", ".join(
+                f"{k}={repr(v) if isinstance(v, str) else v}" 
+                for k, v in args_dict.items()
+            )
+            function_called = f"={func_name}({args_str})"
+            functions_called.append(function_called)
+        return "\n".join(functions_called)
+    
+    # OpenAI Completions API (Legacy)
     if hasattr(raw_response, "choices") and raw_response.choices:
         try:
             message = raw_response.choices[0].message
@@ -260,6 +285,7 @@ class RagMetricsClient:
         self.logging_off = False
         self.metadata = None
         self.conversation_id = self.new_conversation()
+        self.callback = None
     
     def new_conversation(self, id: Optional[str] = None):
         """
@@ -610,21 +636,7 @@ class RagMetricsClient:
 
         duration = time.time() - start_time
             
-        # Process and log the interaction
-        input_messages = self._get_input_from_client_call(
-            'runner' if client_type == 'runner_sync' else client_type, 
-            args, 
-            kwargs
-        )        
-        
-        # Callback
-        if client_type == 'runner_sync':
-            cb_result = {
-                "input": input_messages[-1]["content"] if isinstance(input_messages, list) and input_messages else input_messages,
-                "output": response.final_output if hasattr(response, "final_output") else response,
-            }
-        else:
-            cb_result = callback(input_messages, response)
+        cb_result = callback(input_messages, response)
         
         self._log_trace(
             input_messages=input_messages,
@@ -637,137 +649,6 @@ class RagMetricsClient:
             **kwargs
         )
         return response
-
-    async def _openai_agent_async_wrapper(self, orig_run, *args, **kwargs):
-        """
-        Async wrapper for Runner.run
-        
-        Args:
-            orig_run: The original run method
-            *args: Positional arguments to the original method
-            **kwargs: Keyword arguments to the original method
-            
-        Returns:
-            The response from the original method
-        """
-        # Extract metadata for logging
-        metadata_llm = kwargs.pop('metadata', None)
-        contexts = kwargs.pop('contexts', None)
-        expected = kwargs.pop('expected', None)
-        
-        # Start timing
-        start_time = time.time()
-        
-        # Call the original method
-        response = await orig_run(*args, **kwargs)
-        
-        # Calculate duration
-        duration = time.time() - start_time
-        
-        # Get input in a client-specific way
-        input_messages = self._get_input_from_client_call('runner', args, kwargs)
-        
-        # Process for logging
-        cb_result = {
-            "input": input_messages[-1]["content"] if isinstance(input_messages, list) and input_messages else input_messages,
-            "output": response.final_output if hasattr(response, "final_output") else response,
-        }
-        
-        # Log the trace
-        self._log_trace(
-            input_messages=input_messages,
-            response=response,
-            duration=duration,
-            callback_result=cb_result,
-            metadata_llm=metadata_llm,
-            contexts=contexts,
-            expected=expected
-        )
-        
-        return response
-
-    async def _openai_agent_async_streamed_wrapper(self, orig_run_streamed, *args, **kwargs):
-        """
-        Async wrapper for Runner.run_streamed
-        
-        Args:
-            orig_run_streamed: The original run_streamed method
-            *args: Positional arguments to the original method
-            **kwargs: Keyword arguments to the original method
-            
-        Returns:
-            The response from the original method
-        """
-        # Extract metadata
-        metadata_llm = kwargs.pop('metadata', None)
-        contexts = kwargs.pop('contexts', None)
-        expected = kwargs.pop('expected', None)
-        
-        # Start timing
-        start_time = time.time()
-        
-        # Call the original method
-        response = await orig_run_streamed(*args, **kwargs)
-        
-        # Calculate duration
-        duration = time.time() - start_time
-        
-        # Get input
-        input_messages = self._get_input_from_client_call('runner', args, kwargs)
-        
-        # Process for logging
-        cb_result = {
-            "input": input_messages[-1]["content"] if isinstance(input_messages, list) and input_messages else input_messages,
-            "output": "Streamed response" # For streamed responses, we can't easily capture the final output
-        }
-        
-        # Log the trace
-        self._log_trace(
-            input_messages=input_messages,
-            response=response,
-            duration=duration,
-            callback_result=cb_result,
-            metadata_llm=metadata_llm,
-            contexts=contexts,
-            expected=expected
-        )
-        
-        return response
-
-    def _get_input_from_client_call(self, client_type, args, kwargs):
-        """
-        Extract input messages from client-specific call patterns.
-        
-        Args:
-            client_type: Type of client ('openai', 'invoke', 'completion', 'agent', 'runner')
-            args: Positional arguments passed to the client call
-            kwargs: Keyword arguments passed to the client call
-            
-        Returns:
-            The input messages in the appropriate format for the client type
-        """
-        if client_type in ['openai', 'completion']:
-            return kwargs.get('messages')
-
-        elif client_type == 'invoke':
-            input_messages = kwargs.get('input')
-            if input_messages is None and len(args) > 1:
-                input_messages = args[1]
-            return input_messages
-
-        elif client_type == 'runner':
-            # For Runner.run, args[1] is the input, which can be str, Message, or list[Message]
-            if len(args) > 1:
-                # Format the input into a consistent structure
-                input_val = args[1]
-                if isinstance(input_val, str):
-                    return [{"role": "user", "content": input_val}]
-                # Input could be a Message object or list of Messages
-                # We'll assume the Runner.run method handles these formats correctly
-                return input_val
-            return kwargs.get('input')
-            
-        return None
 
     def monitor(self, client, metadata, callback: Optional[Callable[[Any, Any], dict]] = None):
         """
@@ -807,6 +688,7 @@ class RagMetricsClient:
         # Use default callback if none provided.
         if callback is None:
             callback = default_callback
+        self.callback = callback
 
         # Detect client type and get original invoke method
         client_type, orig_invoke = self._detect_client_type(client)
