@@ -1,5 +1,5 @@
 import importlib
-import sys
+from typing import Dict, Any
 
 def import_function(function):
     """
@@ -56,3 +56,22 @@ def import_function(function):
         raise ValueError(f"Failed to import function '{function}': {str(e)}")
     except Exception as e:
         raise ValueError(f"Error importing function '{function}': {str(e)}") 
+
+
+def format_function_signature(func_name: str, args_dict: Dict[str, Any]) -> str:
+    """
+    Format a function signature into a string.
+    
+    Args:
+        func_name: The name of the function.
+        args_dict: Dictionary of argument names and values.
+    
+    Returns:
+        str: Formatted function signature string in the format =function(arg1=val1, arg2=val2, ...)
+    """
+    # Format args as key=value pairs with proper quoting for strings
+    args_str = ", ".join(
+        f"{k}={repr(v) if isinstance(v, str) else v}" 
+        for k, v in args_dict.items()
+    )
+    return f"={func_name}({args_str})"        
