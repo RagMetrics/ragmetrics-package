@@ -35,7 +35,14 @@ def default_input(raw_input):
         return raw_input.get('content', '')
 
     elif hasattr(raw_input, "content"):
-        return raw_input.content    
+        return raw_input.content
+
+    # OpenAI Responses API, function call output
+    if isinstance(raw_input, dict) and \
+        "type" in raw_input and \
+        raw_input["type"] == "function_call_output" and \
+        "output" in raw_input:
+        return raw_input["output"]
     
     else:
         return str(raw_input)
