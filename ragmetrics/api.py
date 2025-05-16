@@ -7,10 +7,10 @@ import json
 import uuid
 import logging
 from typing import Any, Callable, Optional
+from .utils import format_function_signature
 
 logger = logging.getLogger(__name__)
 
-# Keep these functions for backward compatibility
 def default_input(raw_input):
     """
     Format input messages into a standardized string format.
@@ -35,8 +35,7 @@ def default_input(raw_input):
         return raw_input.get('content', '')
 
     elif hasattr(raw_input, "content"):
-        return raw_input.content
-    
+        return raw_input.content    
     
     else:
         return str(raw_input)
@@ -69,36 +68,50 @@ def default_output(raw_response):
                     func_name = tool_call["function"]["name"]
                     # Parse the JSON arguments
                     args_dict = json.loads(tool_call["function"]["arguments"])
-                    # Format args as key=value pairs with proper quoting for strings
-                    args_str = ", ".join(
-                        f"{k}={repr(v) if isinstance(v, str) else v}" 
-                        for k, v in args_dict.items()
-                    )
-                    return f"={func_name}({args_str})"
+                    return format_function_signature(func_name, args_dict)
         except Exception as e:
             logger.error("Error formatting tool_calls from response: %s", e)
 
-    #OpenAI Response API (Used on Agent SDK)    
-    try:
-        from openai.types.responses.response import Response
-        assert isinstance(raw_response, Response)
-        assert raw_response.output[0].type=="function_call"
-        response_api_function_call = True
-    except Exception as e:
-        response_api_function_call = False
-    
-    if response_api_function_call:
-        functions_called = []
-        for res in raw_response.output:                
-            func_name = res.name
-            args_dict = json.loads(res.arguments)
-            args_str = ", ".join(
-                f"{k}={repr(v) if isinstance(v, str) else v}" 
-                for k, v in args_dict.items()
-            )
-            function_called = f"={func_name}({args_str})"
-            functions_called.append(function_called)
-        return "\n".join(functions_called)
+    #OpenAI Response API
+    if isinstance(raw_response, dict) and \
+        raw_response.get('type', None) == 'SpanImpl':
+        
+        #Tool selection
+        try:
+            output = raw_response['span_data']['response']['output']
+            function_calls = []
+            for o in output:
+                if o['type'] == 'function_call':
+                    func_name = o['name']
+                    args_dict = json.loads(o['arguments'])
+                    function_calls.append(format_function_signature(func_name, args_dict))
+            if len(function_calls) > 0:
+                function_calls = '\n'.join(function_calls)
+                return function_calls
+        except KeyError as e:
+            pass
+
+        #Tool response
+        try:
+            if raw_response['span_data']['type'] == 'function':
+                return raw_response['span_data']['output']
+        except KeyError as e:
+            pass
+
+        #Assistant response
+        try:
+            last_output = raw_response['span_data']['response']['output'][-1]
+            if last_output['role'] == 'assistant':
+                return last_output['content'][-1]['text']
+        except KeyError as e:
+            pass
+
+        #Agent span
+        try:
+            if raw_response['span_data']['type'] == 'agent':
+                return f"Agent: {raw_response['span_data']['name']} Completed"
+        except KeyError as e:
+            pass
     
     # OpenAI Completions API (Legacy)
     if hasattr(raw_response, "choices") and raw_response.choices:
@@ -110,12 +123,7 @@ def default_output(raw_response):
                     func_name = tool_call.function.name
                     # Parse the JSON arguments
                     args_dict = json.loads(tool_call.function.arguments)
-                    # Format args as key=value pairs with proper quoting for strings
-                    args_str = ", ".join(
-                        f"{k}={repr(v) if isinstance(v, str) else v}" 
-                        for k, v in args_dict.items()
-                    )
-                    return f"={func_name}({args_str})"
+                    return format_function_signature(func_name, args_dict)
             return message.content
         except Exception as e:
             logger.error("Error extracting content from response.choices: %s", e)

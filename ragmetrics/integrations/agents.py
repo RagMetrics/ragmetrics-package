@@ -4,8 +4,10 @@ Integration with OpenAI Agents SDK for RagMetrics.
 
 import iso8601
 from typing import Any
-# Import client and callback from api without importing the full ragmetrics
+import json
 from ragmetrics.api import ragmetrics_client, default_callback
+# Note: Do not import the full ragmetrics package to avoid circular dependencies
+from ragmetrics.utils import format_function_signature
 
 # Define TracingProcessor as a base class in case import fails
 class TracingProcessor:
@@ -50,14 +52,36 @@ class RagMetricsTracingProcessor(TracingProcessor):
         # Just collect the start time
         pass
 
+    def _raw_input_from_span(self, span):
+        if 'span_data' in span:
+            span_data = span['span_data']
+            span_type = span_data.get('type', None)
+            if span_type == 'function':
+                func_sig = format_function_signature(
+                    func_name=span_data['name'], 
+                    args_dict=json.loads(span_data['input'])
+                )
+                raw_input = {
+                    'content': func_sig,
+                    'tool_call': True
+                }
+            elif span_type == 'agent':
+                raw_input = None
+            elif 'input' in span_data:
+                raw_input = span_data['input']
+            else:
+                raw_input = span_data
+        else:
+            raw_input = None
+        
+        return raw_input        
+    
     def on_span_end(self, span):
         """Called when a span ends (operation completes)."""
+
         # Raw IO
-        try:
-            raw_input = span.span_data.input
-        except:
-            raw_input = None        
         raw_output = self._to_dict(span)
+        raw_input = self._raw_input_from_span(raw_output)     
 
         # Formatted IO
         # TODO: Support alternative callbacks from .monitor()

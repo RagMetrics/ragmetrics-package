@@ -12,11 +12,11 @@ ragmetrics.monitor(Runner)
 # 2. Define your tools and agents as usual
 @function_tool
 def get_weather(city: str) -> str:
-    return f"The weather in {city} is sunny."
+    return f"Sunny."
 
 agent = Agent(
     name="WeatherAgent",
-    instructions="Answer weather queries",
+    instructions="Answer weather queries in full sentences, repeat the city name",
     tools=[get_weather]
 )
 
