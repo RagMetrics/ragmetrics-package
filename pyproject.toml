@@ -4,17 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ragmetrics-client"
-version = "0.1.20"
+version = "0.1.21"
 description = "Monitor your LLM calls. Test your LLM app."
 readme = "README.md"
 requires-python = ">=3.6"
 dependencies = [
-    "requests>=2.20.0"
+    "requests>=2.20.0",
+    "iso8601",
+    "tqdm"
 ]
 authors = [
     { name = "ragmetrics" }
 ]
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["llm", "evaluation", "monitoring", "rag"]
 urls = { Homepage = "https://ragmetrics.ai", Repository = "https://github.com/RagMetrics/ragmetrics-package" }
 classifiers = [
@@ -25,7 +27,6 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
 
