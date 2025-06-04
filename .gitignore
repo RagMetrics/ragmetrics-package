@@ -22,6 +22,7 @@ tmp/
 #Virtual Environment
 env/
 env_openai_v0/
+venv/
 
 #VS Code
 .vscode/
