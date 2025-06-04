@@ -551,6 +551,15 @@ class RagMetricsClient:
         Raises:
             ValueError: If client type is not supported
         """
+
+        # Detect MCP SDK- ClientSession object
+        try:
+            from mcp import ClientSession
+            if client.__name__ == "ClientSession":
+                return 'clientsession', None
+        except ImportError:
+            pass
+
         # Detect OpenAI Agents SDK- Runner object
         try:
             from agents import Runner
@@ -627,6 +636,15 @@ class RagMetricsClient:
                 monitor_agents(async_client)
             except Exception as e:
                 print(f"Error setting up Runner monitoring: {e}")
+        
+        elif client_type == 'clientsession':
+            # Monitor MCP Async client as foundation for MCP SDK
+            try:                
+                from mcp import ClientSession
+                from ragmetrics.integrations.agents import monitor_mcp_server
+                monitor_mcp_server(ClientSession)
+            except Exception as e:
+                print(f"Error setting up ClientSession monitoring: {e}")
             
             return client
 
@@ -654,6 +672,8 @@ class RagMetricsClient:
                 client_type, orig_invoke, callback, client, self_instance, *args, **kwargs
             )
         elif client_type == 'runner':
+            return None
+        elif client_type == 'clientsession':
             return None
         elif client_type == 'completion':
             # Special handling for LiteLLM completion

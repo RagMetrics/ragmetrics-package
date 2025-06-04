@@ -5,6 +5,9 @@ Integration with OpenAI Agents SDK for RagMetrics.
 import iso8601
 from typing import Any
 import json
+import types
+import types
+from datetime import datetime
 from ragmetrics.api import ragmetrics_client, default_callback
 # Note: Do not import the full ragmetrics package to avoid circular dependencies
 from ragmetrics.utils import format_function_signature
@@ -44,6 +47,7 @@ class RagMetricsTracingProcessor(TracingProcessor):
     def on_trace_start(self, trace):
         try:
             self.conversation_id = ragmetrics_client.new_conversation(trace.trace_id)
+            print(self.conversation_id)
         except Exception as e:
             print(f"Error in on_trace_start: {e}")
 
@@ -329,3 +333,76 @@ def monitor_agents(openai_client=None):
         set_trace_processors([NoOpProcessor()])
         print("Using no-op processor due to error")
         return None
+
+
+def trace(mcp_client_session):
+    """
+    Wraps the send_request method of a client session with tracing logic.
+    """
+    original_send_request = mcp_client_session.send_request
+
+    async def traced_send_request(self_instance, request, *args, **kwargs):
+        try:
+            result = await original_send_request(self_instance, request, *args, **kwargs)
+
+            request_data = extract_dict(request)
+            response_data = extract_dict(result)
+
+            method = request_data.get("method")
+            params = request_data.get("params")
+
+            raw_input, raw_output = process_trace(method, params, response_data)
+            callback_result = default_callback(raw_input, raw_output)
+
+            ragmetrics_client._log_trace(
+                input_messages=raw_input,
+                response=raw_output,
+                callback_result=callback_result,
+                conversation_id=ragmetrics_client.new_conversation(),
+            )
+            return result
+
+        except Exception as e:
+            print(f"Error during traced send_request: {e}")
+            traceback.print_exc()
+
+    mcp_client_session.send_request = traced_send_request
+
+
+def extract_dict(obj):
+    """
+    Safely extract a dictionary from an object, using .dict() or .model_dump() if available.
+    """
+    if hasattr(obj, 'dict'):
+        return obj.dict()
+    elif hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+    elif isinstance(obj, dict):
+        return obj
+    return {}
+
+
+def process_trace(method, params, response_data):
+    """
+    Determine raw input and output data to log based on the request method.
+    """
+    if method == "initialize":
+        return params, "response_data"
+
+    elif method == "tools/list":
+        return params, response_data
+
+    elif method == "tools/call":
+        func_sig = format_function_signature(
+            func_name=params.get("name"),
+            args_dict=params.get("arguments", {})
+        )
+        return {
+            'content': func_sig,
+            'tool_call': True
+        }, response_data
+
+    return params or {}, response_data or {}
+
+def monitor_mcp_server(mcp_client_session=None):
+    trace(mcp_client_session)
