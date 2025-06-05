@@ -388,43 +388,7 @@ def process_trace(request_data, response_data):
 
     return params or {}, response_data or {}
 
-def monitor_a2a(a2a_client=None):
-    """
-    Wraps the `send_message` method of an A2AClient with tracing logic.
-    Logs the request/response for observability via ragmetrics client.
-    
-    Args:
-        a2a_client: Instance of A2AClient.
-    
-    Returns:
-        The original `send_message` method for restoration if needed.
-    """
-    original_method = a2a_client.send_message
 
-    @wraps(original_method)
-    async def traced_send_message(self_instance, request, *args, **kwargs):
-        try:
-            result = await original_method(request, *args, **kwargs)
-
-            request_data = extract_dict(request)
-            response_data = extract_dict(result)
-
-            raw_input, raw_output = process_trace(request_data, response_data)
-            callback_result = default_callback(raw_input, raw_output)
-
-            ragmetrics_client._log_trace(
-                input_messages=raw_input,
-                response=raw_output,
-                callback_result=callback_result,
-                conversation_id=ragmetrics_client.new_conversation(request_data.get("id")),
-            )
-            return result
-
-        except Exception as e:
-            print(f"[A2A Monitor] Error during traced send_message: {e}")
-
-    a2a_client.send_message = types.MethodType(traced_send_message, a2a_client)
-    return original_method
 
 def monitor_mcp_server(mcp_client_session=None):
     """
