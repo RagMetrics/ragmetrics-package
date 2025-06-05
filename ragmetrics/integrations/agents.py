@@ -7,6 +7,8 @@ from typing import Any
 import json
 import types
 import types
+from functools import wraps
+import types
 from datetime import datetime
 from ragmetrics.api import ragmetrics_client, default_callback
 # Note: Do not import the full ragmetrics package to avoid circular dependencies
@@ -343,104 +345,11 @@ def monitor_agents(openai_client=None):
         print("Using no-op processor due to error")
         return None
 
-def trace_a2a_client(a2a_client):
-    """
-    Wraps the `send_message` method of an A2AClient with tracing logic.
-
-    Intercepts calls to `send_message`, extracts and logs the request and response
-    using ragmetrics client for observability, debugging, or analytics.
-
-    Args:
-        a2a_client: An instance of the A2AClient whose `send_message` method will be wrapped.
-
-    Returns:
-        The original `send_message` method (unwrapped), allowing restoration if needed.
-    """
-    orig_invoke = a2a_client.send_message
-
-    async def traced_send_message(self_instance, request, *args, **kwargs):
-        try:
-            result = await orig_invoke(self_instance, request, *args, **kwargs)
-
-            request_data = extract_dict(request)
-            response_data = extract_dict(result)
-
-            raw_input, raw_output = process_trace(request_data, response_data)
-            callback_result = default_callback(raw_input, raw_output)
-
-            ragmetrics_client._log_trace(
-                input_messages=raw_input,
-                response=raw_output,
-                callback_result=callback_result,
-                conversation_id=ragmetrics_client.new_conversation(request_data.id),
-            )
-
-            return result
-
-        except Exception as e:
-            print(f"Error during traced send_message: {e}")
-
-    a2a_client.send_message = traced_send_message
-    return orig_invoke
-
-
-def trace_mcp_server(mcp_client_session):
-    """
-    Wraps the send_request method of an MCP client session with tracing logic.
-
-    This function intercepts calls to the original `send_request` method, logs the input
-    and output messages using the ragmetrics client, and allows tracing of interactions
-    with the MCP server for observability and debugging.
-
-    Args:
-        mcp_client_session: An instance of the MCP client session whose `send_request`
-                            method will be wrapped.
-
-    Returns:
-        The original `send_request` method (unwrapped), allowing for potential restoration.
-    """
-    orig_invoke = mcp_client_session.send_request
-
-    async def traced_send_request(self_instance, request, *args, **kwargs):
-        try:
-            result = await orig_invoke(self_instance, request, *args, **kwargs)
-
-            request_data = extract_dict(request)
-            response_data = extract_dict(result)
-
-            method = request_data.get("method")
-            params = request_data.get("params")
-
-            raw_input, raw_output = process_trace(method, params, response_data)
-            callback_result = default_callback(raw_input, raw_output)
-
-            ragmetrics_client._log_trace(
-                input_messages=raw_input,
-                response=raw_output,
-                callback_result=callback_result,
-                conversation_id=ragmetrics_client.new_conversation(),
-            )
-            return result
-
-        except Exception as e:
-            print(f"Error during traced send_request: {e}")
-
-
-    mcp_client_session.send_request = traced_send_request
-    return orig_invoke
-
 def extract_dict(obj):
     """
-    Safely extracts a dictionary representation from an object.
-
-    Tries multiple strategies like using `.dict()` or `.model_dump()` methods
-    if available, otherwise returns the object if it's already a dictionary.
-
-    Args:
-        obj: The object to be converted to a dictionary.
-
-    Returns:
-        dict: A dictionary representation of the input object.
+    Extracts a dictionary representation from an object.
+    Uses `.dict()` or `.model_dump()` methods if available.
+    Returns the object itself if it's already a dictionary.
     """
     if hasattr(obj, 'dict'):
         return obj.dict()
@@ -452,31 +361,19 @@ def extract_dict(obj):
 
 def process_trace(request_data, response_data):
     """
-    Determines how to format the input and output data for a specific MCP method call.
-
-    Handles special formatting for known MCP methods like `tools/call` to produce
-    human-readable function call signatures.
-
-    Args:
-        method (str): The method name from the MCP request (e.g., "tools/list").
-        params (dict): The parameters sent in the request.
-        response_data (dict): The response data returned from the MCP server.
-
-    Returns:
-        Tuple[dict, dict]: A tuple containing formatted input and output data for tracing.
+    Formats input and output data for tracing based on the MCP method.
+    Special handling for known methods to produce readable traces.
     """
     method = request_data.get("method")
     params = request_data.get("params")
-    print("method", method)
-    print("params", params)
 
     if method == "initialize":
+        return f"protocolVersion={response_data.get('protocolVersion')}", response_data
+
+    if method == "tools/list":
         return params, response_data
 
-    elif method == "tools/list":
-        return params, response_data
-
-    elif method == "tools/call":
+    if method == "tools/call":
         func_sig = format_function_signature(
             func_name=params.get("name"),
             args_dict=params.get("arguments", {})
@@ -486,26 +383,83 @@ def process_trace(request_data, response_data):
             'tool_call': True
         }, response_data
 
+    if method == "message/send":
+        return params["message"]["parts"][0]["text"], response_data
+
     return params or {}, response_data or {}
+
+def monitor_a2a(a2a_client=None):
+    """
+    Wraps the `send_message` method of an A2AClient with tracing logic.
+    Logs the request/response for observability via ragmetrics client.
+    
+    Args:
+        a2a_client: Instance of A2AClient.
+    
+    Returns:
+        The original `send_message` method for restoration if needed.
+    """
+    original_method = a2a_client.send_message
+
+    @wraps(original_method)
+    async def traced_send_message(self_instance, request, *args, **kwargs):
+        try:
+            result = await original_method(request, *args, **kwargs)
+
+            request_data = extract_dict(request)
+            response_data = extract_dict(result)
+
+            raw_input, raw_output = process_trace(request_data, response_data)
+            callback_result = default_callback(raw_input, raw_output)
+
+            ragmetrics_client._log_trace(
+                input_messages=raw_input,
+                response=raw_output,
+                callback_result=callback_result,
+                conversation_id=ragmetrics_client.new_conversation(request_data.get("id")),
+            )
+            return result
+
+        except Exception as e:
+            print(f"[A2A Monitor] Error during traced send_message: {e}")
+
+    a2a_client.send_message = types.MethodType(traced_send_message, a2a_client)
+    return original_method
 
 def monitor_mcp_server(mcp_client_session=None):
     """
-    Enables tracing for the MCP client session if the MCP SDK is available.
-
-    This function checks whether the MCP SDK is installed and available. If it is,
-    it applies tracing to the provided MCP client session to log request and response
-    data for monitoring purposes. If the SDK is not available, it prints a warning
-    message and skips tracing setup.
-
-    Args:
-        mcp_client_session: The MCP client session object whose 
-                                       `send_request` method will be wrapped for tracing.
-
-    Returns:
-        The original `send_request` method if tracing is applied, otherwise None.
-    """
-    if not MCP_SDK_AVAILABLE:
-        print("MCP Agents SDK is not installed. Please install with pip install mcp")
-        return None
+    Wraps the `send_request` method of an MCP client session with tracing logic.
+    Logs the input/output using ragmetrics for observability and debugging.
     
-    return trace_mcp_server(mcp_client_session)
+    Args:
+        mcp_client_session: Instance of the MCP client session.
+    
+    Returns:
+        The original `send_request` method for restoration if needed.
+    """
+    original_method = mcp_client_session.send_request
+
+    @wraps(original_method)
+    async def traced_send_request(self_instance, request, *args, **kwargs):
+        try:
+            result = await original_method(self_instance, request, *args, **kwargs)
+
+            request_data = extract_dict(request)
+            response_data = extract_dict(result)
+
+            raw_input, raw_output = process_trace(request_data, response_data)
+            callback_result = default_callback(raw_input, raw_output)
+
+            ragmetrics_client._log_trace(
+                input_messages=raw_input,
+                response=raw_output,
+                callback_result=callback_result,
+                conversation_id=ragmetrics_client.new_conversation(),
+            )
+            return result
+
+        except Exception as e:
+            print(f"[MCP Monitor] Error during traced send_request: {e}")
+
+    mcp_client_session.send_request = traced_send_request
+    return original_method

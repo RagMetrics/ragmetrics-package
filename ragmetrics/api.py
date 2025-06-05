@@ -552,6 +552,14 @@ class RagMetricsClient:
             ValueError: If client type is not supported
         """
 
+        # Detect A2A SDK- A2AClient object
+        try:
+            from a2a.client import A2AClient
+            if isinstance(client, A2AClient):
+                return 'a2aclient', None
+        except ImportError:
+            pass
+
         # Detect MCP SDK- ClientSession object
         try:
             from mcp import ClientSession
@@ -645,6 +653,14 @@ class RagMetricsClient:
                 monitor_mcp_server(ClientSession)
             except Exception as e:
                 print(f"Error setting up ClientSession monitoring: {e}")
+        
+        elif client_type == 'a2aclient':
+            # Monitor MCP Async client as foundation for MCP SDK
+            try:                
+                from ragmetrics.integrations.agents import monitor_a2a
+                monitor_a2a(client)
+            except Exception as e:
+                print(f"Error setting up A2AClient monitoring: {e}")
             
             return client
 
@@ -674,6 +690,8 @@ class RagMetricsClient:
         elif client_type == 'runner':
             return None
         elif client_type == 'clientsession':
+            return None
+        elif client_type == 'a2aclient':
             return None
         elif client_type == 'completion':
             # Special handling for LiteLLM completion
