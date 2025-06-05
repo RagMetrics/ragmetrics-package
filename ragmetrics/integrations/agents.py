@@ -344,9 +344,20 @@ def monitor_agents(openai_client=None):
         return None
 
 
-def trace(mcp_client_session):
+def trace_mcp_server(mcp_client_session):
     """
-    Wraps the send_request method of a client session with tracing logic.
+    Wraps the send_request method of an MCP client session with tracing logic.
+
+    This function intercepts calls to the original `send_request` method, logs the input
+    and output messages using the ragmetrics client, and allows tracing of interactions
+    with the MCP server for observability and debugging.
+
+    Args:
+        mcp_client_session: An instance of the MCP client session whose `send_request`
+                            method will be wrapped.
+
+    Returns:
+        The original `send_request` method (unwrapped), allowing for potential restoration.
     """
     orig_invoke = mcp_client_session.send_request
 
@@ -376,13 +387,20 @@ def trace(mcp_client_session):
 
 
     mcp_client_session.send_request = traced_send_request
-    import types
-    #mcp_client_session.send_request = types.MethodType(traced_send_request, mcp_client_session)
     return orig_invoke
 
 def extract_dict(obj):
     """
-    Safely extract a dictionary from an object, using .dict() or .model_dump() if available.
+    Safely extracts a dictionary representation from an object.
+
+    Tries multiple strategies like using `.dict()` or `.model_dump()` methods
+    if available, otherwise returns the object if it's already a dictionary.
+
+    Args:
+        obj: The object to be converted to a dictionary.
+
+    Returns:
+        dict: A dictionary representation of the input object.
     """
     if hasattr(obj, 'dict'):
         return obj.dict()
@@ -394,7 +412,18 @@ def extract_dict(obj):
 
 def process_trace(method, params, response_data):
     """
-    Determine raw input and output data to log based on the request method.
+    Determines how to format the input and output data for a specific MCP method call.
+
+    Handles special formatting for known MCP methods like `tools/call` to produce
+    human-readable function call signatures.
+
+    Args:
+        method (str): The method name from the MCP request (e.g., "tools/list").
+        params (dict): The parameters sent in the request.
+        response_data (dict): The response data returned from the MCP server.
+
+    Returns:
+        Tuple[dict, dict]: A tuple containing formatted input and output data for tracing.
     """
     if method == "initialize":
         return params, "response_data"
@@ -415,8 +444,23 @@ def process_trace(method, params, response_data):
     return params or {}, response_data or {}
 
 def monitor_mcp_server(mcp_client_session=None):
+    """
+    Enables tracing for the MCP client session if the MCP SDK is available.
+
+    This function checks whether the MCP SDK is installed and available. If it is,
+    it applies tracing to the provided MCP client session to log request and response
+    data for monitoring purposes. If the SDK is not available, it prints a warning
+    message and skips tracing setup.
+
+    Args:
+        mcp_client_session: The MCP client session object whose 
+                                       `send_request` method will be wrapped for tracing.
+
+    Returns:
+        The original `send_request` method if tracing is applied, otherwise None.
+    """
     if not MCP_SDK_AVAILABLE:
         print("MCP Agents SDK is not installed. Please install with pip install mcp")
         return None
     
-    trace(mcp_client_session)
+    return trace_mcp_server(mcp_client_session)
