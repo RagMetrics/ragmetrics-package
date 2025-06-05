@@ -3,6 +3,9 @@ import nest_asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 import ragmetrics
+#load .env
+from dotenv import load_dotenv
+load_dotenv()
 
 nest_asyncio.apply()  # Needed to run interactive python
 
@@ -13,7 +16,7 @@ async def main():
     # Define server parameters
     server_params = StdioServerParameters(
         command="python",  # The command to run your server
-        args=["server.py"],  # Arguments to the command
+        args=["mcpserver.py"],  # Arguments to the command
     )
 
     # Connect to the server
@@ -31,7 +34,7 @@ async def main():
 
             # Call our calculator tool
             result = await session.call_tool("add", arguments={"a": 2, "b": 3})
-            #print(f"2 + 3 = {result.content[0].text}")
+            print(f"2 + 3 = {result.content[0].text}")
 
 
 if __name__ == "__main__":

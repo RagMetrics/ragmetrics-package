@@ -24,6 +24,15 @@ class TracingProcessor:
 
 # Try to import agents SDK
 try:
+    from mcp import ClientSession
+    MCP_SDK_AVAILABLE = True
+except ImportError:
+    # when MCP SDK is not available
+    print("Warning: MCP SDK not available, tracing will not work")
+    MCP_SDK_AVAILABLE = False
+
+# Try to import MCP SDK
+try:
     from agents.tracing.processor_interface import TracingProcessor
     from agents import set_trace_processors
     AGENTS_SDK_AVAILABLE = True
@@ -339,11 +348,11 @@ def trace(mcp_client_session):
     """
     Wraps the send_request method of a client session with tracing logic.
     """
-    original_send_request = mcp_client_session.send_request
+    orig_invoke = mcp_client_session.send_request
 
     async def traced_send_request(self_instance, request, *args, **kwargs):
         try:
-            result = await original_send_request(self_instance, request, *args, **kwargs)
+            result = await orig_invoke(self_instance, request, *args, **kwargs)
 
             request_data = extract_dict(request)
             response_data = extract_dict(result)
@@ -364,10 +373,12 @@ def trace(mcp_client_session):
 
         except Exception as e:
             print(f"Error during traced send_request: {e}")
-            traceback.print_exc()
+
 
     mcp_client_session.send_request = traced_send_request
-
+    import types
+    #mcp_client_session.send_request = types.MethodType(traced_send_request, mcp_client_session)
+    return orig_invoke
 
 def extract_dict(obj):
     """
@@ -380,7 +391,6 @@ def extract_dict(obj):
     elif isinstance(obj, dict):
         return obj
     return {}
-
 
 def process_trace(method, params, response_data):
     """
@@ -405,4 +415,8 @@ def process_trace(method, params, response_data):
     return params or {}, response_data or {}
 
 def monitor_mcp_server(mcp_client_session=None):
+    if not MCP_SDK_AVAILABLE:
+        print("MCP Agents SDK is not installed. Please install with pip install mcp")
+        return None
+    
     trace(mcp_client_session)
