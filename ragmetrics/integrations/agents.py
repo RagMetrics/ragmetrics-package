@@ -343,6 +343,46 @@ def monitor_agents(openai_client=None):
         print("Using no-op processor due to error")
         return None
 
+def trace_a2a_client(a2a_client):
+    """
+    Wraps the `send_message` method of an A2AClient with tracing logic.
+
+    Intercepts calls to `send_message`, extracts and logs the request and response
+    using ragmetrics client for observability, debugging, or analytics.
+
+    Args:
+        a2a_client: An instance of the A2AClient whose `send_message` method will be wrapped.
+
+    Returns:
+        The original `send_message` method (unwrapped), allowing restoration if needed.
+    """
+    orig_invoke = a2a_client.send_message
+
+    async def traced_send_message(self_instance, request, *args, **kwargs):
+        try:
+            result = await orig_invoke(self_instance, request, *args, **kwargs)
+
+            request_data = extract_dict(request)
+            response_data = extract_dict(result)
+
+            raw_input, raw_output = process_trace(request_data, response_data)
+            callback_result = default_callback(raw_input, raw_output)
+
+            ragmetrics_client._log_trace(
+                input_messages=raw_input,
+                response=raw_output,
+                callback_result=callback_result,
+                conversation_id=ragmetrics_client.new_conversation(request_data.id),
+            )
+
+            return result
+
+        except Exception as e:
+            print(f"Error during traced send_message: {e}")
+
+    a2a_client.send_message = traced_send_message
+    return orig_invoke
+
 
 def trace_mcp_server(mcp_client_session):
     """
@@ -410,7 +450,7 @@ def extract_dict(obj):
         return obj
     return {}
 
-def process_trace(method, params, response_data):
+def process_trace(request_data, response_data):
     """
     Determines how to format the input and output data for a specific MCP method call.
 
@@ -425,8 +465,13 @@ def process_trace(method, params, response_data):
     Returns:
         Tuple[dict, dict]: A tuple containing formatted input and output data for tracing.
     """
+    method = request_data.get("method")
+    params = request_data.get("params")
+    print("method", method)
+    print("params", params)
+
     if method == "initialize":
-        return params, "response_data"
+        return params, response_data
 
     elif method == "tools/list":
         return params, response_data
