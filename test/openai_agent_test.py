@@ -3,7 +3,7 @@ from agents import Agent, Runner, function_tool
 
 #load .env
 from dotenv import load_dotenv
-load_dotenv('.env')
+load_dotenv()
 
 # 1. Configure RagMetrics and monitor the agents Runner
 ragmetrics.login()
