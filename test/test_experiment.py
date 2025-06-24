@@ -36,7 +36,7 @@ exp_models = Experiment(
     dataset=dataset1,   
     task=task1,         
     cohorts=[cohort1, cohort2],
-    criteria=["Accuracy", "QA_Context mentions a phone"],
+    criteria=["Accuracy"],
     judge_model="gpt-4o-mini"
 )
 
