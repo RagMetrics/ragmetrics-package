@@ -296,7 +296,7 @@ class RagMetricsClient:
         before using other functionality.
         """
         self.access_token = None
-        self.base_url = 'https://ragmetrics.ai'
+        self.base_url = 'https://api.ragmetrics.ai'
         self.logging_off = False
         self.metadata = None
         self.conversation_id = self.new_conversation()
@@ -463,7 +463,7 @@ class RagMetricsClient:
     
     Args:
             key: The API key for authentication. Get this from your RagMetrics dashboard.
-            base_url: Optional custom base URL for the API (default: https://ragmetrics.ai).
+            base_url: Optional custom base URL for the API (default: https://api.ragmetrics.ai).
             off: Whether to disable logging entirely (default: False).
 
     
@@ -490,7 +490,7 @@ class RagMetricsClient:
         elif 'RAGMETRICS_BASE_URL' in os.environ:
             self.base_url = os.environ['RAGMETRICS_BASE_URL']
         else:
-            self.base_url = 'https://ragmetrics.ai'
+            self.base_url = 'https://api.ragmetrics.ai'
 
         response = self._make_request(
             method='post',
