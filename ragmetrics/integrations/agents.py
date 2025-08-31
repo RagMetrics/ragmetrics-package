@@ -5,6 +5,11 @@ Integration with OpenAI Agents SDK for RagMetrics.
 import iso8601
 from typing import Any
 import json
+import types
+import types
+from functools import wraps
+import types
+from datetime import datetime
 from ragmetrics.api import ragmetrics_client, default_callback
 # Note: Do not import the full ragmetrics package to avoid circular dependencies
 from ragmetrics.utils import format_function_signature
@@ -20,6 +25,15 @@ class TracingProcessor:
     def force_flush(self): pass
 
 # Try to import agents SDK
+try:
+    from mcp import ClientSession
+    MCP_SDK_AVAILABLE = True
+except ImportError:
+    # when MCP SDK is not available
+    print("Warning: MCP SDK not available, tracing will not work")
+    MCP_SDK_AVAILABLE = False
+
+# Try to import MCP SDK
 try:
     from agents.tracing.processor_interface import TracingProcessor
     from agents import set_trace_processors
@@ -44,6 +58,7 @@ class RagMetricsTracingProcessor(TracingProcessor):
     def on_trace_start(self, trace):
         try:
             self.conversation_id = ragmetrics_client.new_conversation(trace.trace_id)
+            print(self.conversation_id)
         except Exception as e:
             print(f"Error in on_trace_start: {e}")
 
@@ -329,3 +344,86 @@ def monitor_agents(openai_client=None):
         set_trace_processors([NoOpProcessor()])
         print("Using no-op processor due to error")
         return None
+
+def extract_dict(obj):
+    """
+    Extracts a dictionary representation from an object.
+    Uses `.dict()` or `.model_dump()` methods if available.
+    Returns the object itself if it's already a dictionary.
+    """
+    if hasattr(obj, 'dict'):
+        return obj.dict()
+    elif hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+    elif isinstance(obj, dict):
+        return obj
+    return {}
+
+def process_trace(request_data, response_data):
+    """
+    Formats input and output data for tracing based on the MCP method.
+    Special handling for known methods to produce readable traces.
+    """
+    method = request_data.get("method")
+    params = request_data.get("params")
+
+    if method == "initialize":
+        return f"protocolVersion={response_data.get('protocolVersion')}", response_data
+
+    if method == "tools/list":
+        return params, response_data
+
+    if method == "tools/call":
+        func_sig = format_function_signature(
+            func_name=params.get("name"),
+            args_dict=params.get("arguments", {})
+        )
+        return {
+            'content': func_sig,
+            'tool_call': True
+        }, response_data
+
+    if method == "message/send":
+        return params["message"]["parts"][0]["text"], response_data
+
+    return params or {}, response_data or {}
+
+
+
+def monitor_mcp_server(mcp_client_session=None):
+    """
+    Wraps the `send_request` method of an MCP client session with tracing logic.
+    Logs the input/output using ragmetrics for observability and debugging.
+    
+    Args:
+        mcp_client_session: Instance of the MCP client session.
+    
+    Returns:
+        The original `send_request` method for restoration if needed.
+    """
+    original_method = mcp_client_session.send_request
+
+    @wraps(original_method)
+    async def traced_send_request(self_instance, request, *args, **kwargs):
+        try:
+            result = await original_method(self_instance, request, *args, **kwargs)
+
+            request_data = extract_dict(request)
+            response_data = extract_dict(result)
+
+            raw_input, raw_output = process_trace(request_data, response_data)
+            callback_result = default_callback(raw_input, raw_output)
+
+            ragmetrics_client._log_trace(
+                input_messages=raw_input,
+                response=raw_output,
+                callback_result=callback_result,
+                conversation_id=ragmetrics_client.new_conversation(),
+            )
+            return result
+
+        except Exception as e:
+            print(f"[MCP Monitor] Error during traced send_request: {e}")
+
+    mcp_client_session.send_request = traced_send_request
+    return original_method
