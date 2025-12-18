@@ -34,4 +34,5 @@ from ragmetrics.criteria import Criteria
 from ragmetrics.reviews import ReviewQueue
 from ragmetrics.trace import Trace
 from ragmetrics.utils import import_function
+from ragmetrics.evaluations import Evaluation
 from ragmetrics.integrations.agents import monitor_agents
